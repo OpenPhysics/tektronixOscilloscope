@@ -11,8 +11,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   SESSION_SETUP, commandKey, diffAll, encodeAcquisition, encodeAll, encodeChannel,
-  encodeHorizontal, encodeTrigger, formatNumber, isPlausibleCommand, parseBoolean,
-  parseIdentity, parseNumber, readbackPlan, waveformSetup,
+  encodeHorizontal, encodeTrigger, formatNumber, isPlausibleCommand, matchEnum,
+  parseBoolean, parseIdentity, parseNumber, readbackPlan, waveformSetup,
 } from '../src/device/scpi.ts';
 import { defaultInstrumentState } from '../src/device/types.ts';
 
@@ -200,11 +200,12 @@ describe('reply parsing', () => {
   });
 
   it('splits an identity string into its four fields', () => {
-    const identity = parseIdentity('TEKTRONIX,TBS 1072B-EDU,C011239,CF:91.1CT FV:v24.31');
+    // The exact string this instrument returned on 2026-09-14.
+    const identity = parseIdentity('TEKTRONIX,TBS 1072B-EDU,C011239,CF:91.1CT FV:v2.52');
     expect(identity.vendor).toBe('TEKTRONIX');
     expect(identity.model).toBe('TBS 1072B-EDU');
     expect(identity.serial).toBe('C011239');
-    expect(identity.firmware).toBe('CF:91.1CT FV:v24.31');
+    expect(identity.firmware).toBe('CF:91.1CT FV:v2.52');
   });
 });
 
@@ -250,6 +251,70 @@ describe('readback', () => {
     const state = defaultInstrumentState();
     readbackPlan().find((item) => item.command === 'CH1:COUPLING?')?.apply(state, 'XYZ');
     expect(state.ch1.coupling).toBe('DC');
+  });
+
+  it('accepts the abbreviated keywords the instrument actually sends', () => {
+    // Verified 2026-09-14 on a TBS1072B-EDU, firmware FV:v2.52: under VERBOSE
+    // OFF, `ACQUIRE:MODE?` answers `SAM`, not `SAMPLE`. Comparing against the
+    // full word rejected every valid reply, and a rejected readback is skipped
+    // silently - so the control just never updated.
+    const state = defaultInstrumentState();
+    const plan = readbackPlan();
+    const apply = (command: string, reply: string): void => {
+      plan.find((item) => item.command === command)?.apply(state, reply);
+    };
+
+    apply('ACQUIRE:MODE?', 'SAM');
+    expect(state.acquisition.mode).toBe('SAMPLE');
+
+    apply('ACQUIRE:MODE?', 'PEAK');
+    expect(state.acquisition.mode).toBe('PEAKDETECT');
+
+    apply('ACQUIRE:MODE?', 'AVE');
+    expect(state.acquisition.mode).toBe('AVERAGE');
+
+    apply('TRIGGER:MAIN:EDGE:SLOPE?', 'RIS');
+    expect(state.trigger.slope).toBe('RISE');
+
+    apply('TRIGGER:MAIN:MODE?', 'NORM');
+    expect(state.trigger.mode).toBe('NORMAL');
+
+    apply('CH1:BANDWIDTH?', 'TWE');
+    expect(state.ch1.bandwidthLimited).toBe(true);
+  });
+
+  it('reads back the bandwidth limit, which it also sets', () => {
+    // Every parameter encodeChannel sends should be readable, or the page can
+    // show a bandwidth the instrument is not using.
+    const commands = readbackPlan().map((item) => item.command);
+    expect(commands).toContain('CH1:BANDWIDTH?');
+    expect(commands).toContain('CH2:BANDWIDTH?');
+  });
+});
+
+describe('matchEnum', () => {
+  it('takes an exact match in preference to a prefix', () => {
+    // EXT is a prefix of EXT5, so without exact-first the scope saying "EXT"
+    // would be ambiguous and silently dropped.
+    expect(matchEnum('EXT', ['CH1', 'CH2', 'EXT', 'EXT5', 'LINE'])).toBe('EXT');
+    expect(matchEnum('EXT5', ['CH1', 'CH2', 'EXT', 'EXT5', 'LINE'])).toBe('EXT5');
+  });
+
+  it('resolves an unambiguous abbreviation', () => {
+    expect(matchEnum('SAM', ['SAMPLE', 'PEAKDETECT', 'AVERAGE'])).toBe('SAMPLE');
+  });
+
+  it('refuses an ambiguous abbreviation rather than guessing', () => {
+    expect(matchEnum('A', ['AUTO', 'AVERAGE'])).toBeNull();
+  });
+
+  it('is case and whitespace insensitive', () => {
+    expect(matchEnum('  sam \n', ['SAMPLE'])).toBe('SAMPLE');
+  });
+
+  it('returns null for an empty or unknown reply', () => {
+    expect(matchEnum('', ['SAMPLE'])).toBeNull();
+    expect(matchEnum('XYZ', ['SAMPLE'])).toBeNull();
   });
 });
 

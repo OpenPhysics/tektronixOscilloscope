@@ -284,10 +284,15 @@ export function readbackPlan(): Readback[] {
       {
         command: `CH${id}:COUPLING?`,
         apply: (state, reply) => {
-          const text = reply.trim().toUpperCase();
-          if (text === 'DC' || text === 'AC' || text === 'GND') {
-            state[key].coupling = text;
-          }
+          const value = matchEnum(reply, ['DC', 'AC', 'GND'] as const);
+          if (value) state[key].coupling = value;
+        },
+      },
+      {
+        command: `CH${id}:BANDWIDTH?`,
+        apply: (state, reply) => {
+          const value = matchEnum(reply, ['FULL', 'TWENTY'] as const);
+          if (value) state[key].bandwidthLimited = value === 'TWENTY';
         },
       },
     );
@@ -311,25 +316,22 @@ export function readbackPlan(): Readback[] {
     {
       command: 'TRIGGER:MAIN:EDGE:SOURCE?',
       apply: (state, reply) => {
-        const text = reply.trim().toUpperCase();
-        if (text === 'CH1' || text === 'CH2' || text === 'EXT' ||
-            text === 'EXT5' || text === 'LINE') {
-          state.trigger.source = text;
-        }
+        const value = matchEnum(reply, ['CH1', 'CH2', 'EXT', 'EXT5', 'LINE'] as const);
+        if (value) state.trigger.source = value;
       },
     },
     {
       command: 'TRIGGER:MAIN:EDGE:SLOPE?',
       apply: (state, reply) => {
-        const text = reply.trim().toUpperCase();
-        if (text === 'RISE' || text === 'FALL') state.trigger.slope = text;
+        const value = matchEnum(reply, ['RISE', 'FALL'] as const);
+        if (value) state.trigger.slope = value;
       },
     },
     {
       command: 'TRIGGER:MAIN:MODE?',
       apply: (state, reply) => {
-        const text = reply.trim().toUpperCase();
-        if (text === 'AUTO' || text === 'NORMAL') state.trigger.mode = text;
+        const value = matchEnum(reply, ['AUTO', 'NORMAL'] as const);
+        if (value) state.trigger.mode = value;
       },
     },
     {
@@ -342,10 +344,8 @@ export function readbackPlan(): Readback[] {
     {
       command: 'ACQUIRE:MODE?',
       apply: (state, reply) => {
-        const text = reply.trim().toUpperCase();
-        if (text === 'SAMPLE' || text === 'PEAKDETECT' || text === 'AVERAGE') {
-          state.acquisition.mode = text;
-        }
+        const value = matchEnum(reply, ['SAMPLE', 'PEAKDETECT', 'AVERAGE'] as const);
+        if (value) state.acquisition.mode = value;
       },
     },
     {
@@ -383,6 +383,30 @@ export function parseNumber(reply: string): number {
 export function parseBoolean(reply: string): boolean {
   const text = reply.trim().toUpperCase();
   return text === '1' || text === 'ON' || text === 'RUN' || text === 'TRUE';
+}
+
+/**
+ * Match an enumerated reply, allowing the abbreviated form.
+ *
+ * Verified 2026-09-14: under `VERBOSE OFF` this instrument answers enumerations
+ * with the minimum-length keyword - `ACQUIRE:MODE?` returns `SAM`, not `SAMPLE`.
+ * Comparing against the full word therefore rejects every valid reply, and
+ * because a rejected readback is silently skipped, the failure looks like the
+ * control simply refusing to update.
+ *
+ * Exact matches win before prefixes, which is what keeps `EXT` from being
+ * ambiguous with `EXT5`. An abbreviation matching more than one value returns
+ * null rather than guessing.
+ */
+export function matchEnum<T extends string>(reply: string, allowed: readonly T[]): T | null {
+  const text = reply.trim().toUpperCase();
+  if (text.length === 0) return null;
+
+  const exact = allowed.find((value) => value === text);
+  if (exact !== undefined) return exact;
+
+  const candidates = allowed.filter((value) => value.startsWith(text));
+  return candidates.length === 1 ? (candidates[0] ?? null) : null;
 }
 
 export interface Identity {

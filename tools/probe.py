@@ -261,8 +261,15 @@ def cmd_info(scope: UsbTmc, _args: argparse.Namespace) -> None:
     print(f"  bulk OUT       : 0x{scope.ep_out.bEndpointAddress:02x}")
     print(f"  bulk IN        : 0x{scope.ep_in.bEndpointAddress:02x} "
           f"(max packet {scope.max_packet})")
+    # GET_CAPABILITIES layout: bcdUSBTMC at 2-3, USBTMC interface/device
+    # capabilities at 4/5, then bcdUSB488 at 12-13 with the USB488
+    # interface/device capabilities at 14/15. An earlier version of this file
+    # printed bytes 4 and 5 as the USB488 pair, which they are not.
     print(f"  USBTMC version : {caps[3]:02x}.{caps[2]:02x}")
-    print(f"  USB488 iface   : 0x{caps[4]:02x}  device caps: 0x{caps[5]:02x}")
+    print(f"  USBTMC iface   : 0x{caps[4]:02x}  device: 0x{caps[5]:02x}"
+          f"  (TermChar {'yes' if caps[5] & 0x01 else 'no'})")
+    print(f"  USB488 version : {caps[13]:02x}.{caps[12]:02x}")
+    print(f"  USB488 iface   : 0x{caps[14]:02x}  device: 0x{caps[15]:02x}")
     print()
 
     setup_session(scope)
@@ -276,13 +283,21 @@ def cmd_info(scope: UsbTmc, _args: argparse.Namespace) -> None:
         ("CH2:SCALE?", "CH2 (V/div)"),
         ("TRIGGER:MAIN:LEVEL?", "trigger level"),
         ("TRIGGER:MAIN:EDGE:SOURCE?", "trigger source"),
-        ("WFMPRE:NR_PT?", "record length"),
     ]:
         try:
             print(f"  {label:<18}: {scope.query(question)}")
         except Exception as error:  # noqa: BLE001 - probing, report and continue
             print(f"  {label:<18}: FAILED ({error})")
             scope.clear()
+
+    # WFMPRE reports on whatever DATA:SOURCE currently names, so the source has
+    # to be selected before the record length means anything.
+    try:
+        scope.write("DATA:SOURCE CH1")
+        print(f"  {'record length':<18}: {scope.query('WFMPRE:NR_PT?')}")
+    except Exception as error:  # noqa: BLE001 - probing, report and continue
+        print(f"  {'record length':<18}: FAILED ({error})")
+        scope.clear()
 
 
 def cmd_query(scope: UsbTmc, args: argparse.Namespace) -> None:

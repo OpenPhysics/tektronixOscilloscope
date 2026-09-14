@@ -3,10 +3,9 @@
 Reference for the two protocols this project implements: **USBTMC**, which carries
 bytes, and **SCPI**, which is what those bytes say.
 
-Not yet verified against hardware. Every claim below is marked, and the marking is
-the point — a command that looks right and is silently ignored is the characteristic
-failure of this instrument, so a claim that has not been tested is worth less than
-no claim at all.
+Every claim below is marked, and the marking is the point — a command that looks right
+and is silently ignored is the characteristic failure of this instrument, so a claim
+that has not been tested is worth less than no claim at all.
 
 | Mark | Meaning |
 |---|---|
@@ -17,8 +16,10 @@ no claim at all.
 To verify a row, run `python3 tools/probe.py try-spellings` (see [SETUP.md](SETUP.md)),
 then change its mark here and add the date.
 
-**Verified against:** nothing yet. Device on the bench is a TBS1072B-EDU,
-serial C011239, USB `0699:0368`.
+**Verified against:** a TBS1072B-EDU, serial C011239, firmware `CF:91.1CT FV:v2.52`,
+USB `0699:0368`, on **2026-09-14** with `tools/probe.py info`. `try-spellings`,
+`curve` and `screen` have not been run yet, so the rows they would settle are still
+marked.
 
 ---
 
@@ -28,8 +29,17 @@ serial C011239, USB `0699:0368`.
 `bInterfaceClass = 0xFE` (application specific), `bInterfaceSubClass = 0x03`
 (test & measurement). Confirmed from `usbipd list` on this machine.
 
-**[M]** `bInterfaceProtocol = 0x01` means USB488, i.e. it also speaks IEEE 488.2
-common commands (`*IDN?`, `*CLS`, `*ESR?`).
+**[V]** The USBTMC interface is number **0**, with bulk-OUT at endpoint address
+`0x04`, bulk-IN at `0x82`, and a **64-byte** maximum packet size. USBTMC version
+reports as **01.00**.
+
+**[V]** `*IDN?` answers `TEKTRONIX,TBS 1072B-EDU,C011239,CF:91.1CT FV:v2.52` — note
+the space in the model name, and that the firmware field carries two colon-separated
+parts.
+
+**[V]** USBTMC device capabilities byte reads `0x01`, i.e. the device supports ending
+a bulk-IN transfer on a TermChar. This driver does not use that, since the header's
+length field already delimits every reply.
 
 There is no UART bridge inside. **The Web Serial API cannot see this instrument** —
 Windows creates no COM port for it, so `navigator.serial.requestPort()` opens an
@@ -102,11 +112,33 @@ VERBOSE OFF
 LOCK NONE
 ```
 
-`HEADER OFF` is the one that matters. With headers on, `CH1:SCALE?` answers
+**[V]** `HEADER OFF` is the one that matters. With headers on, `CH1:SCALE?` answers
 `:CH1:SCALE 5.0E-1` instead of `5.0E-1`, and every numeric parser in `scpi.ts`
 breaks. `LOCK NONE` keeps the physical front panel alive while the page is
 connected — without it the knobs go dead, which is baffling if you are standing at
 the bench.
+
+### [V] VERBOSE OFF means replies come back abbreviated
+
+This one cost a real bug. Under `VERBOSE OFF` the instrument answers enumerated
+queries with the **minimum-length** keyword, not the full one:
+
+| Query | Reply observed | Full form |
+|---|---|---|
+| `ACQUIRE:MODE?` | `SAM` | `SAMPLE` |
+| `ACQUIRE:STATE?` | `1` | — |
+| `CH1:COUPLING?` | `DC` | `DC` |
+| `TRIGGER:MAIN:EDGE:SOURCE?` | `CH1` | `CH1` |
+
+Comparing a reply against the full word therefore rejects every valid answer. Because
+`readbackPlan` skips a reply it cannot interpret — deliberately, so one bad reply costs
+one control rather than the whole sync — the symptom was not an error but a control
+that silently never updated.
+
+`matchEnum` in `scpi.ts` now resolves abbreviations, taking an exact match ahead of a
+prefix so that `EXT` stays distinct from `EXT5`, and refusing an ambiguous
+abbreviation rather than guessing. Note that the instrument **sends** short forms but
+**accepts** long ones, so the encoders are unaffected.
 
 ### Commands this project sends
 
@@ -117,28 +149,33 @@ the abbreviated forms shown in mixed case in the manual (`HORizontal:SCAle`).
 |---|---|
 | Channel on/off | `SELECT:CH<n> ON\|OFF` |
 | Probe attenuation | `CH<n>:PROBE <1\|10\|100\|1000>` |
-| Volts per division | `CH<n>:SCALE <volts>` |
+| Volts per division | `CH<n>:SCALE <volts>` **[V]** |
 | Vertical position | `CH<n>:POSITION <divisions>` |
-| Coupling | `CH<n>:COUPLING DC\|AC\|GND` |
+| Coupling | `CH<n>:COUPLING DC\|AC\|GND` **[V]** |
 | Bandwidth limit | `CH<n>:BANDWIDTH FULL\|TWENTY` |
-| Timebase | `HORIZONTAL:SCALE <seconds>` **[?]** |
+| Timebase | `HORIZONTAL:SCALE <seconds>` **[V]** |
 | Horizontal position | `HORIZONTAL:POSITION <seconds>` **[?]** |
-| Trigger source | `TRIGGER:MAIN:EDGE:SOURCE CH1\|CH2\|EXT\|EXT5\|LINE` |
+| Trigger source | `TRIGGER:MAIN:EDGE:SOURCE CH1\|CH2\|EXT\|EXT5\|LINE` **[V]** |
 | Trigger slope | `TRIGGER:MAIN:EDGE:SLOPE RISE\|FALL` |
 | Trigger mode | `TRIGGER:MAIN:MODE AUTO\|NORMAL` |
-| Trigger level | `TRIGGER:MAIN:LEVEL <volts>` **[?]** |
-| Acquisition mode | `ACQUIRE:MODE SAMPLE\|PEAKDETECT\|AVERAGE` |
+| Trigger level | `TRIGGER:MAIN:LEVEL <volts>` **[V]** |
+| Acquisition mode | `ACQUIRE:MODE SAMPLE\|PEAKDETECT\|AVERAGE` **[V]** |
 | Averaging count | `ACQUIRE:NUMAVG 4\|16\|64\|128` |
-| Run / stop | `ACQUIRE:STATE RUN\|STOP` |
+| Run / stop | `ACQUIRE:STATE RUN\|STOP` **[V]** |
 | Free-run vs single | `ACQUIRE:STOPAFTER RUNSTOP\|SEQUENCE` |
 
 #### The spellings marked [?]
 
 The TDS1000/2000 family uses `HORIZONTAL:MAIN:SCALE` and `TRIGGER:A:LEVEL`; the
-TBS1000B manual gives the unprefixed forms. Since the families share a manual
-lineage but not a command set, `tools/probe.py try-spellings` asks the instrument
-which of each pair it accepts. **Until that has been run, these four rows are
-guesses.**
+TBS1000B manual gives the unprefixed forms.
+
+**[V] Settled 2026-09-14: this firmware takes the unprefixed forms.** Both
+`HORIZONTAL:SCALE?` (answered `5.0E-4`) and `TRIGGER:MAIN:LEVEL?` (answered `3.28E0`)
+return values rather than errors, so the TBS spellings are correct and the TDS ones
+are not needed.
+
+`HORIZONTAL:POSITION` is still **[?]** — it was not part of the `info` run.
+`tools/probe.py try-spellings` covers it.
 
 `ACQUIRE:STOPAFTER` and `ACQUIRE:STATE` are sent as a pair. Setting `STATE` alone
 leaves the previous stop-after mode in force, so a run command after a single-shot
