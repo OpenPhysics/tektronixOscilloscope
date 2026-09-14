@@ -36,11 +36,16 @@ const GET_CAPABILITIES = 7;
 const CLEAR_STATUS_PENDING = 0x02;
 
 /**
- * A CURVe? on this scope is 2500 bytes, and a hardcopy image is a few hundred
- * kilobytes. One megabyte is generous for both and small enough that a firmware
- * bug in the length field cannot make the page allocate unboundedly.
+ * Ceiling on one reply, so a firmware bug in the length field cannot make the
+ * page allocate unboundedly.
+ *
+ * Measured, not guessed: a CURVe? is 2500 bytes, but a hardcopy of this
+ * instrument's 800x480 screen as 24-bit BMP is 1,152,054 bytes. An earlier
+ * value of 1 MB silently truncated every screen capture - see `readReply` for
+ * why that was worse than it sounds. Four megabytes leaves room for a larger
+ * screen without being large enough to matter.
  */
-const MAX_REPLY_BYTES = 1024 * 1024;
+const MAX_REPLY_BYTES = 4 * 1024 * 1024;
 
 /** Ceiling on a single bulk-IN request, so a long reply arrives in steps. */
 const MAX_TRANSFER_BYTES = 64 * 1024;
@@ -285,6 +290,7 @@ export class UsbTmcTransport {
 
     const chunks: Uint8Array[] = [];
     let total = 0;
+    let complete = false;
 
     while (total < MAX_REPLY_BYTES) {
       const want = Math.min(MAX_REPLY_BYTES - total, MAX_TRANSFER_BYTES);
@@ -322,7 +328,21 @@ export class UsbTmcTransport {
       chunks.push(payload.slice());
       total += payload.length;
 
-      if (header.eom) break;
+      if (header.eom) {
+        complete = true;
+        break;
+      }
+    }
+
+    // Running out of budget mid-message is not a short read to be handed back:
+    // the rest of the reply is still sitting in the endpoint, so the next query
+    // would receive the tail of this one. Fail, and let the caller's clear
+    // resynchronise. Returning the truncated bytes silently is how a capped
+    // buffer turns into a corrupt image and then an unexplained timeout.
+    if (!complete) {
+      throw new Error(
+        `reply exceeded ${MAX_REPLY_BYTES} bytes without completing; endpoint reset`,
+      );
     }
 
     const reply = new Uint8Array(total);

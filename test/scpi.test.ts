@@ -70,7 +70,7 @@ describe('channel encoding', () => {
       'CH1:SCALE 1.000000E+0',
       'CH1:POSITION 0',
       'CH1:COUPLING DC',
-      'CH1:BANDWIDTH FULL',
+      'CH1:BANDWIDTH OFF',
     ]);
   });
 
@@ -80,9 +80,13 @@ describe('channel encoding', () => {
       .toBeLessThan(commands.findIndex((c) => c.startsWith('CH1:SCALE')));
   });
 
-  it('spells the 20 MHz limit TWENTY, not ON', () => {
+  it('spells the 20 MHz limit ON, not TWENTY', () => {
+    // Verified 2026-09-14: `CH1:BANDWIDTH TWENTY` and `CH1:BANDWIDTH FULL` are
+    // both rejected as syntax errors. This firmware takes ON and OFF only, so
+    // the bandwidth control never worked until this was corrected.
     const limited = { ...state.ch1, bandwidthLimited: true };
-    expect(encodeChannel(2, limited)).toContain('CH2:BANDWIDTH TWENTY');
+    expect(encodeChannel(2, limited)).toContain('CH2:BANDWIDTH ON');
+    expect(encodeChannel(2, state.ch1)).toContain('CH2:BANDWIDTH OFF');
   });
 });
 
@@ -279,8 +283,10 @@ describe('readback', () => {
     apply('TRIGGER:MAIN:MODE?', 'NORM');
     expect(state.trigger.mode).toBe('NORMAL');
 
-    apply('CH1:BANDWIDTH?', 'TWE');
+    apply('CH1:BANDWIDTH?', 'ON');
     expect(state.ch1.bandwidthLimited).toBe(true);
+    apply('CH1:BANDWIDTH?', 'OFF');
+    expect(state.ch1.bandwidthLimited).toBe(false);
   });
 
   it('reads back the bandwidth limit, which it also sets', () => {

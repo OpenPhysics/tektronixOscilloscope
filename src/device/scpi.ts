@@ -83,7 +83,7 @@ export function encodeChannel(id: ChannelId, channel: ChannelState): string[] {
     `CH${id}:SCALE ${formatNumber(channel.scaleVPerDiv)}`,
     `CH${id}:POSITION ${formatNumber(channel.positionDiv)}`,
     `CH${id}:COUPLING ${channel.coupling}`,
-    `CH${id}:BANDWIDTH ${channel.bandwidthLimited ? 'TWENTY' : 'FULL'}`,
+    `CH${id}:BANDWIDTH ${channel.bandwidthLimited ? 'ON' : 'OFF'}`,
   ];
 }
 
@@ -221,13 +221,17 @@ export const ERROR_QUERY = 'EVMSG?';
 /**
  * Image formats to try for a screen capture, best first.
  *
- * PNG is listed first because browsers render it without help and it is what a
- * lab report wants; BMP is the fallback because browsers decode that natively
- * too. PCX and TIFF appear in the manual but neither displays in a browser, so
- * they are not offered. Which of these the firmware actually accepts is
- * unverified - see docs/PROTOCOL.md.
+ * Verified 2026-09-14: this firmware rejects PNG outright - `SAVE:IMAGE:FILEFORMAT
+ * PNG` raises a command error - and accepts BMP, JPEG, TIFF and PCX. Only BMP and
+ * JPEG are offered here because they are the two a browser can decode without a
+ * library; TIFF and PCX would need one.
+ *
+ * BMP is preferred over JPEG despite being far larger. The screen is mostly thin
+ * traces and small text, which is exactly what JPEG's block artefacts damage most,
+ * and a screenshot in a lab report should not have compression noise on the
+ * graticule.
  */
-export const SCREENSHOT_FORMATS: readonly string[] = ['PNG', 'BMP'];
+export const SCREENSHOT_FORMATS: readonly string[] = ['BMP', 'JPEG'];
 
 /**
  * One front-panel value read back from the instrument.
@@ -291,8 +295,8 @@ export function readbackPlan(): Readback[] {
       {
         command: `CH${id}:BANDWIDTH?`,
         apply: (state, reply) => {
-          const value = matchEnum(reply, ['FULL', 'TWENTY'] as const);
-          if (value) state[key].bandwidthLimited = value === 'TWENTY';
+          const value = matchEnum(reply, ['ON', 'OFF'] as const);
+          if (value) state[key].bandwidthLimited = value === 'ON';
         },
       },
     );

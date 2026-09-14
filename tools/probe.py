@@ -138,12 +138,30 @@ class UsbTmc:
         )
         self.ep_out.write(self._pad4(header + payload), self.timeout_ms)
 
-    def read_raw(self, max_bytes: int = 1024 * 1024) -> bytes:
-        """Request a reply and reassemble it across bulk-IN transfers until EOM."""
-        chunks: list[bytes] = []
-        remaining = max_bytes
+    def read_raw(self, max_bytes: int = 4 * 1024 * 1024) -> bytes:
+        """
+        Request a reply and reassemble it across bulk-IN transfers until EOM.
 
-        while remaining > 0:
+        The request size and the read size must be the same number. Each
+        REQUEST_DEV_DEP_MSG_IN is answered by one DEV_DEP_MSG_IN transfer that
+        carries exactly one 12-byte header, so asking for a megabyte and then
+        reading 64 kB of it leaves the rest of that transfer queued - and the
+        next read, which the code treats as a fresh header, is really raw
+        payload. That mis-parse is silent: it yields plausible-looking bytes and
+        a corrupt image.
+
+        The cap is 4 MB because a hardcopy of the 800x480 screen as 24-bit BMP is
+        1,152,054 bytes.
+        """
+        chunks: list[bytes] = []
+        total = 0
+        complete = False
+
+        # One chunk per round trip, matched between request and read.
+        chunk = 32 * 1024
+
+        while total < max_bytes:
+            want = min(chunk, max_bytes - total)
             btag = self._next_btag()
             request = struct.pack(
                 "<BBBBIBBH",
@@ -151,30 +169,42 @@ class UsbTmc:
                 btag,
                 (~btag) & 0xFF,
                 0x00,
-                min(remaining, 0x100000),
+                want,
                 0x00,  # no TermChar: let the length field delimit the reply
                 0x00,
                 0x0000,
             )
             self.ep_out.write(self._pad4(request), self.timeout_ms)
 
-            # Ask for header + payload rounded up to whole packets; libusb will
-            # return short, which is how a transfer ends.
-            want = min(remaining + 12, 64 * 1024)
-            want += -want % self.max_packet
-            reply = self.ep_in.read(want, self.timeout_ms).tobytes()
+            # Read header plus payload, rounded up to whole packets: a bulk
+            # transfer ends on a short packet, so a non-multiple can truncate.
+            read_length = want + 12
+            read_length += -read_length % self.max_packet
+            reply = self.ep_in.read(read_length, self.timeout_ms).tobytes()
 
             if len(reply) < 12:
                 raise IOError(f"truncated USBTMC header: {len(reply)} bytes")
 
+            reply_btag = reply[1]
+            if reply_btag != btag:
+                raise IOError(f"USBTMC bTag mismatch: sent {btag}, got {reply_btag}")
+
             size = struct.unpack_from("<I", reply, 4)[0]
             attributes = reply[8]
-            body = reply[12 : 12 + size]
+            body = reply[12 : 12 + min(size, len(reply) - 12)]
             chunks.append(body)
-            remaining -= len(body)
+            total += len(body)
 
             if attributes & 0x01:  # EOM
+                complete = True
                 break
+
+        if not complete:
+            # The rest of the message is still queued in the endpoint, so the next
+            # query would read this one's tail. Fail loudly and let the caller clear.
+            raise IOError(
+                f"reply exceeded {max_bytes} bytes without completing; endpoint needs a clear"
+            )
 
         return b"".join(chunks)
 
@@ -302,14 +332,14 @@ def cmd_info(scope: UsbTmc, _args: argparse.Namespace) -> None:
 
 def cmd_query(scope: UsbTmc, args: argparse.Namespace) -> None:
     setup_session(scope)
-    print(scope.query(args.command))
+    print(scope.query(args.scpi))
 
 
 def cmd_send(scope: UsbTmc, args: argparse.Namespace) -> None:
     setup_session(scope)
-    scope.write(args.command)
+    scope.write(args.scpi)
     # Nothing acknowledges a setting, so ask the error queue whether it liked it.
-    print(f"sent: {args.command}")
+    print(f"sent: {args.scpi}")
     print(f"EVMSG?: {scope.query('EVMSG?')}")
 
 
@@ -459,10 +489,10 @@ def main() -> None:
     sub.add_parser("repl", help="interactive session")
 
     p_query = sub.add_parser("query", help="send one query and print the reply")
-    p_query.add_argument("command")
+    p_query.add_argument("scpi", help="the query to send, e.g. '*IDN?'")
 
     p_send = sub.add_parser("send", help="send one setting and check the error queue")
-    p_send.add_argument("command")
+    p_send.add_argument("scpi", help="the setting to send, e.g. 'CH1:SCALE 0.5'")
 
     p_curve = sub.add_parser("curve", help="capture a waveform and report its extremes")
     p_curve.add_argument("--channel", type=int, default=1, choices=(1, 2))

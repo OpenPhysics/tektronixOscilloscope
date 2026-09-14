@@ -17,9 +17,8 @@ To verify a row, run `python3 tools/probe.py try-spellings` (see [SETUP.md](SETU
 then change its mark here and add the date.
 
 **Verified against:** a TBS1072B-EDU, serial C011239, firmware `CF:91.1CT FV:v2.52`,
-USB `0699:0368`, on **2026-09-14** with `tools/probe.py info`. `try-spellings`,
-`curve` and `screen` have not been run yet, so the rows they would settle are still
-marked.
+USB `0699:0368`, on **2026-09-14** with `tools/probe.py info`, `try-spellings` and
+`curve`. Hardcopy is partly settled — see the screen capture section.
 
 ---
 
@@ -147,22 +146,22 @@ the abbreviated forms shown in mixed case in the manual (`HORizontal:SCAle`).
 
 | Purpose | Command |
 |---|---|
-| Channel on/off | `SELECT:CH<n> ON\|OFF` |
-| Probe attenuation | `CH<n>:PROBE <1\|10\|100\|1000>` |
+| Channel on/off | `SELECT:CH<n> ON\|OFF` **[V]** |
+| Probe attenuation | `CH<n>:PROBE <1\|10\|100\|1000>` **[V]** |
 | Volts per division | `CH<n>:SCALE <volts>` **[V]** |
 | Vertical position | `CH<n>:POSITION <divisions>` |
 | Coupling | `CH<n>:COUPLING DC\|AC\|GND` **[V]** |
-| Bandwidth limit | `CH<n>:BANDWIDTH FULL\|TWENTY` |
+| Bandwidth limit | `CH<n>:BANDWIDTH ON\|OFF` **[V]** |
 | Timebase | `HORIZONTAL:SCALE <seconds>` **[V]** |
-| Horizontal position | `HORIZONTAL:POSITION <seconds>` **[?]** |
+| Horizontal position | `HORIZONTAL:POSITION <seconds>` **[V]** |
 | Trigger source | `TRIGGER:MAIN:EDGE:SOURCE CH1\|CH2\|EXT\|EXT5\|LINE` **[V]** |
-| Trigger slope | `TRIGGER:MAIN:EDGE:SLOPE RISE\|FALL` |
+| Trigger slope | `TRIGGER:MAIN:EDGE:SLOPE RISE\|FALL` **[V]** |
 | Trigger mode | `TRIGGER:MAIN:MODE AUTO\|NORMAL` |
 | Trigger level | `TRIGGER:MAIN:LEVEL <volts>` **[V]** |
 | Acquisition mode | `ACQUIRE:MODE SAMPLE\|PEAKDETECT\|AVERAGE` **[V]** |
-| Averaging count | `ACQUIRE:NUMAVG 4\|16\|64\|128` |
+| Averaging count | `ACQUIRE:NUMAVG 4\|16\|64\|128` **[V]** |
 | Run / stop | `ACQUIRE:STATE RUN\|STOP` **[V]** |
-| Free-run vs single | `ACQUIRE:STOPAFTER RUNSTOP\|SEQUENCE` |
+| Free-run vs single | `ACQUIRE:STOPAFTER RUNSTOP\|SEQUENCE` **[V]** |
 
 #### The spellings marked [?]
 
@@ -174,8 +173,27 @@ TBS1000B manual gives the unprefixed forms.
 return values rather than errors, so the TBS spellings are correct and the TDS ones
 are not needed.
 
-`HORIZONTAL:POSITION` is still **[?]** — it was not part of the `info` run.
-`tools/probe.py try-spellings` covers it.
+`HORIZONTAL:POSITION?` also answers (`0.0E0`), so the whole horizontal group uses the
+unprefixed spelling. `HORIZONTAL:MAIN:SCALE?` happens to work *as well* — the firmware
+accepts both — but `HORIZONTAL:DELAY:TIME?` and `TRIGGER:A:LEVEL?` do not.
+
+#### [V] The bandwidth limit takes ON|OFF
+
+Not `FULL|TWENTY`, which both raise `102,"Syntax error; invalid character data"`. The
+query answers `ON` or `OFF` too. This is worth singling out because it is the one case
+found so far where a *setting* is rejected outright rather than ignored — most of this
+instrument's failure modes are silent.
+
+#### [V] An unrecognised query times out; it does not return an error
+
+`HORIZONTAL:DELAY:TIME?`, `TRIGGER:A:LEVEL?` and `SAVE:IMAGE:LAYOUT?` all produce
+`[Errno 110] Operation timed out` rather than an error reply. The event queue does
+record `113,"Undefined header"` afterwards, but only if you can still talk to the
+instrument — and the endpoint is left mid-transaction, so the *next* query fails too
+unless a USBTMC clear runs first.
+
+This is why `withTimeout` in `usbtmc.ts` performs a clear on every timeout. Without it
+one typo in the raw console would poison every command after it.
 
 `ACQUIRE:STOPAFTER` and `ACQUIRE:STATE` are sent as a pair. Setting `STATE` alone
 leaves the previous stop-after mode in force, so a run command after a single-shot
@@ -239,19 +257,43 @@ are shown precisely so that difference is visible.
 ### Screen capture
 
 ```
-SAVE:IMAGE:FILEFORMAT PNG
+SAVE:IMAGE:FILEFORMAT BMP
 HARDCOPY START
 ```
 
-**[?]** **Genuinely unknown.** The TBS1000B manual lists BMP, PCX, TIFF, RLE,
-EPSIMAGE and JPEG. Whether PNG is among them on this firmware has not been tested.
+**[V]** The format vocabulary, settled 2026-09-14 by setting each and reading it back:
 
-The app tries PNG then BMP, checking `*ESR?` after setting the format to see whether
-it was rejected, and sniffs the returned bytes' magic numbers rather than trusting
-the format it asked for. Browsers decode PNG, JPEG and BMP natively, so no image
-decoder is needed; PCX and TIFF would need one, and are not offered.
+| Format | Accepted | Browser can decode |
+|---|---|---|
+| `PNG` | **no** — `102,"Syntax error"` | — |
+| `BMP` | yes | yes |
+| `JPEG` | yes | yes |
+| `TIFF` | yes | no |
+| `PCX` | yes | no |
 
-`python3 tools/probe.py screen --out /tmp/screen` settles this in one run.
+So the app tries **BMP then JPEG**. BMP is preferred despite its size: the screen is
+thin traces and small text, exactly what JPEG artefacts damage most.
+
+**[V]** The screen is **800x480**, and a 24-bit BMP of it is **1,152,054 bytes**
+(`cbSize` from the header, 1,152,000 of pixel data plus a 54-byte header).
+
+That number matters. `MAX_REPLY_BYTES` was originally 1 MB, so the transfer stopped one
+chunk short of the end and the reply was silently truncated — and worse, the remainder
+stayed queued in the endpoint, so every subsequent query read the tail of the abandoned
+image and timed out. Both the TypeScript and the prober now cap at 4 MB **and raise
+rather than return** when the cap is reached without EOM, so the failure is loud and the
+caller's clear can resynchronise.
+
+**[?] Hardcopy is not yet confirmed working end to end.** One transfer succeeded (the
+truncated one above, whose BMP header was intact and correct). Every attempt afterwards
+returned no data at all, with `*ESR?` reporting 0 and an empty event queue — the command
+is accepted and nothing is sent. `BUSY?` reads 1 and stays 1 even with the acquisition
+stopped, which suggests the instrument's hardcopy state machine is still waiting on the
+transfer that was aborted underneath it: a USBTMC clear resets the endpoints, not the
+instrument's own sense of what it was doing.
+
+**Retest after a power cycle** to confirm, and note that `HARDCOPY:PORT` reads `USB`,
+which on this family means the remote interface rather than the front-panel flash drive.
 
 ### Error checking
 
