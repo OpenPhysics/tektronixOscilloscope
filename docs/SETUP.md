@@ -85,26 +85,61 @@ usbipd detach --busid 1-4
 > Zadig, `usbipd detach` restores WinUSB, so the two coexist fine as long as you detach
 > before going back to the browser.
 
+### Python dependencies
+
+**`pip install pyusb` does not work on Ubuntu 24.04.** Its Python is marked
+externally managed (PEP 668), so a bare `pip install` refuses with
+`error: externally-managed-environment`. Use either of these instead.
+
+A virtual environment, which needs no root:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install pyusb
+.venv/bin/python3 tools/probe.py info
+```
+
+Or the distribution package, which puts it on the system Python:
+
+```bash
+sudo apt install python3-usb
+python3 tools/probe.py info
+```
+
+`.venv/` is gitignored. Either way pyusb needs libusb, which Ubuntu ships by default
+(`libusb-1.0-0`) — check the backend resolved with
+`.venv/bin/python3 -c "import usb.backend.libusb1 as b; print(b.get_backend())"`.
+
+The prober deliberately does *not* use PyVISA. It speaks the same raw USBTMC framing that
+`src/device/usbtmc.ts` implements, so a discrepancy in the framing shows up here rather
+than inside a browser tab.
+
 ### Permissions
 
-WSL2 exposes the attached device as a raw USB node that root owns. Either run the prober
-with `sudo`, or install a udev rule so your user may claim it:
+WSL2 exposes the attached device as a raw USB node that root owns with mode 0664, so
+claiming it as an ordinary user fails with:
+
+```
+usb.core.USBError: [Errno 13] Access denied (insufficient permissions)
+```
+
+That error means pyusb *found* the scope — the attach worked and only the permission is
+missing. Either run the prober under `sudo`, or install a udev rule once:
 
 ```bash
 echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="0699", ATTR{idProduct}=="0368", MODE="0666"' \
   | sudo tee /etc/udev/rules.d/99-tektronix.rules
-sudo service udev restart
+sudo udevadm control --reload-rules
 ```
 
-### Python dependencies
+Then detach and reattach the device from Windows (`usbipd detach` / `usbipd attach`) so
+the node is recreated under the new rule.
 
-```bash
-pip install pyusb
-```
-
-`pyusb` needs libusb, which Ubuntu has by default (`libusb-1.0-0`). The prober deliberately
-does *not* use PyVISA — it speaks the same raw USBTMC framing that `src/device/usbtmc.ts`
-implements, so a discrepancy in the framing shows up here rather than in the browser.
+> The udev rule only takes effect if systemd is running in WSL, which requires
+> `[boot]\nsystemd=true` in `/etc/wsl.conf`. Check with `ps -p 1 -o comm=` — if that
+> prints `init` rather than `systemd`, udev rules are not applied and `sudo` is the only
+> route. Note that under `sudo` you must name the venv's interpreter explicitly,
+> `sudo .venv/bin/python3 tools/probe.py`, since root's PATH will not find it.
 
 ---
 
