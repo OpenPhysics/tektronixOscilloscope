@@ -124,22 +124,37 @@ usb.core.USBError: [Errno 13] Access denied (insufficient permissions)
 ```
 
 That error means pyusb *found* the scope — the attach worked and only the permission is
-missing. Either run the prober under `sudo`, or install a udev rule once:
+missing. Install a udev rule once and neither `sudo` nor a reattach is needed again:
 
 ```bash
 echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="0699", ATTR{idProduct}=="0368", MODE="0666"' \
   | sudo tee /etc/udev/rules.d/99-tektronix.rules
 sudo udevadm control --reload-rules
+sudo udevadm trigger --attr-match=idVendor=0699
 ```
 
-Then detach and reattach the device from Windows (`usbipd detach` / `usbipd attach`) so
-the node is recreated under the new rule.
+The `trigger` is what applies the new rule to a device that is *already* attached, by
+replaying a change event against it. Without that line you would have to detach and
+reattach from Windows to get the node recreated.
+
+Confirm it took:
+
+```bash
+ls -l /dev/bus/usb/*/*     # the scope's node should now be crw-rw-rw-
+python3 tools/probe.py info
+```
+
+`sudo` is the alternative, but it needs a terminal to prompt on. Run from anything
+non-interactive — a script, a CI step, an editor's shell integration — it fails with
+`sudo: a terminal is required to read the password`. The udev rule avoids the problem
+entirely, which is why it is the recommended route rather than merely a convenience.
+Under `sudo` you must also name the venv's interpreter explicitly,
+`sudo .venv/bin/python3 tools/probe.py`, since root's PATH will not find it.
 
 > The udev rule only takes effect if systemd is running in WSL, which requires
-> `[boot]\nsystemd=true` in `/etc/wsl.conf`. Check with `ps -p 1 -o comm=` — if that
-> prints `init` rather than `systemd`, udev rules are not applied and `sudo` is the only
-> route. Note that under `sudo` you must name the venv's interpreter explicitly,
-> `sudo .venv/bin/python3 tools/probe.py`, since root's PATH will not find it.
+> `[boot]` / `systemd=true` in `/etc/wsl.conf`. Check with `ps -p 1 -o comm=` — if that
+> prints `init` rather than `systemd`, udev rules are not applied and `sudo` from a real
+> terminal is the only route.
 
 ---
 
