@@ -222,6 +222,21 @@ function stopMeasurementPolling(): void {
  * as a failed transfer, so the event queue is what decides whether to move on.
  */
 async function captureScreen(): Promise<void> {
+  // A screen transfer is slow enough to look like a hang - 1.8 s as JPEG and
+  // 9.5 s as BMP, measured - so say something before going quiet.
+  const button = need<HTMLButtonElement>('screenshot-button');
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Capturing...';
+  try {
+    await transferScreen();
+  } finally {
+    button.textContent = label;
+    button.disabled = !transport.isConnected;
+  }
+}
+
+async function transferScreen(): Promise<void> {
   for (const format of SCREENSHOT_FORMATS) {
     await transport.write('*CLS');
     await sendSequence(screenshotSetup(format));

@@ -17,8 +17,10 @@ To verify a row, run `python3 tools/probe.py try-spellings` (see [SETUP.md](SETU
 then change its mark here and add the date.
 
 **Verified against:** a TBS1072B-EDU, serial C011239, firmware `CF:91.1CT FV:v2.52`,
-USB `0699:0368`, on **2026-09-14** with `tools/probe.py info`, `try-spellings` and
-`curve`. Hardcopy is partly settled — see the screen capture section.
+USB `0699:0368`, on **2026-09-14** with `tools/probe.py info`, `try-spellings`, `curve`
+and `screen`. The capture path is confirmed end to end: a transferred record scaled
+here reads 1000.0 Hz / 5.200 V pk-pk / −160 mV minimum, matching the instrument's own
+front-panel readout of 1.000 kHz / 5.20 V / −160 mV digit for digit.
 
 ---
 
@@ -284,16 +286,39 @@ image and timed out. Both the TypeScript and the prober now cap at 4 MB **and ra
 rather than return** when the cap is reached without EOM, so the failure is loud and the
 caller's clear can resynchronise.
 
-**[?] Hardcopy is not yet confirmed working end to end.** One transfer succeeded (the
-truncated one above, whose BMP header was intact and correct). Every attempt afterwards
-returned no data at all, with `*ESR?` reporting 0 and an empty event queue — the command
-is accepted and nothing is sent. `BUSY?` reads 1 and stays 1 even with the acquisition
-stopped, which suggests the instrument's hardcopy state machine is still waiting on the
-transfer that was aborted underneath it: a USBTMC clear resets the endpoints, not the
-instrument's own sense of what it was doing.
+**[V] Hardcopy is confirmed working**, after a power cycle:
 
-**Retest after a power cycle** to confirm, and note that `HARDCOPY:PORT` reads `USB`,
-which on this family means the remote interface rather than the front-panel flash drive.
+| Format | Size | Time | Rate |
+|---|---|---|---|
+| JPEG | 184,845 bytes | 1.8 s | ~98 kB/s |
+| BMP | 1,152,108 bytes | 9.5 s | ~119 kB/s |
+
+The app tries **JPEG first** on that evidence. At the quality this firmware encodes at,
+the traces and menu text are crisp, and five times the wait for a difference you cannot
+see is the wrong trade at a teaching bench. The JPEG also carries EXIF naming the
+manufacturer, model and capture time, which is useful provenance for a lab report.
+
+**[V] `HARDCOPY START` returns raw image bytes, not an IEEE 488.2 block.** The reply
+begins `42 4d` (`BM`) or `ff d8 ff` directly, with no `#<n><length>` prefix — unlike
+`CURVe?`, which does use one. So the screenshot path must *not* run
+`parseDefiniteLengthBlock`, and the waveform path must.
+
+**[V]** The BMP arrives with **54 trailing zero bytes** beyond the `cbSize` its own
+header declares. Harmless — decoders use the declared size — but do not treat the
+transfer length as the image length.
+
+#### [V] An aborted hardcopy wedges the instrument
+
+When the truncated 1 MB read above abandoned a transfer mid-flight, every subsequent
+`HARDCOPY START` returned **nothing at all**: no data, `*ESR?` reporting 0, an empty
+event queue, and `BUSY?` stuck at 1 even with the acquisition stopped. A USBTMC clear
+resets the endpoints but not the instrument's own sense of what it was doing, and no
+command sequence recovered it. **Only a power cycle did** — after which `BUSY?` read 0
+and hardcopy worked first time.
+
+This is the strongest argument for the "raise, do not truncate" rule in `readReply`: a
+silently short read does not merely corrupt one image, it can take the instrument out
+of service until someone walks over and switches it off.
 
 ### Error checking
 
