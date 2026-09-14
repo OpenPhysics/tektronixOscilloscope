@@ -125,34 +125,46 @@ export class Plot {
       return;
     }
 
-    const window_ = this.viewport();
-    this.drawAxisLabels(plot, window_);
+    const time = this.timeViewport();
+    this.drawAxisLabels(plot, time);
     for (const capture of this.captures) {
-      this.drawTrace(plot, window_, capture);
+      this.drawTrace(plot, time, this.channelViewport(capture.channel), capture);
     }
-    this.drawCursor(plot, window_);
+    this.drawLegend(plot);
+    this.drawCursor(plot, time);
   }
 
   /**
-   * The time and voltage span the graticule covers.
+   * The time span the graticule covers, shared by every trace.
    *
-   * Taken from the instrument's own scale settings rather than from the data, so
-   * the display matches the scope's screen - including a flat trace sitting off
-   * to one side, which is information the student needs to see.
+   * Taken from the instrument's own timebase rather than from the data, so the
+   * display matches the scope's screen - including a flat trace sitting off to
+   * one side, which is information the student needs to see.
    */
-  private viewport(): { tSpan: number; tCentre: number; vSpan: number; vCentre: number } {
+  private timeViewport(): { tSpan: number; tCentre: number } {
     const instrument = this.instrument;
-    const first = this.captures[0];
-    if (!instrument || !first) {
-      return { tSpan: 1, tCentre: 0, vSpan: 1, vCentre: 0 };
-    }
-
-    const channel = first.channel === 1 ? instrument.ch1 : instrument.ch2;
+    if (!instrument) return { tSpan: 1, tCentre: 0 };
     return {
       tSpan: instrument.horizontal.scaleSPerDiv * HORIZONTAL_DIVISIONS,
       tCentre: instrument.horizontal.positionS,
-      vSpan: channel.scaleVPerDiv * VERTICAL_DIVISIONS,
-      vCentre: -channel.positionDiv * channel.scaleVPerDiv,
+    };
+  }
+
+  /**
+   * The voltage span for one channel.
+   *
+   * Each channel has its own VOLTS/DIV and its own position, exactly as on the
+   * instrument, so the two traces share a graticule but not a voltage mapping.
+   * Scaling both by one channel's settings would silently misdraw the other
+   * whenever the two are set differently - which is the normal case.
+   */
+  private channelViewport(channel: ChannelId): { vSpan: number; vCentre: number } {
+    const instrument = this.instrument;
+    if (!instrument) return { vSpan: 1, vCentre: 0 };
+    const settings = channel === 1 ? instrument.ch1 : instrument.ch2;
+    return {
+      vSpan: settings.scaleVPerDiv * VERTICAL_DIVISIONS,
+      vCentre: -settings.positionDiv * settings.scaleVPerDiv,
     };
   }
 
@@ -208,31 +220,70 @@ export class Plot {
     context.restore();
   }
 
+  /**
+   * Label the axes.
+   *
+   * The voltage axis can only speak for one channel, so it labels the first
+   * captured one and is drawn in that channel's colour; the legend carries each
+   * channel's volts per division so the other trace can still be read.
+   */
   private drawAxisLabels(
     plot: { left: number; top: number; width: number; height: number },
-    viewport: { tSpan: number; tCentre: number; vSpan: number; vCentre: number },
+    time: { tSpan: number; tCentre: number },
   ): void {
+    const reference = this.captures[0];
+    if (!reference) return;
+    const vertical = this.channelViewport(reference.channel);
+
     const context = this.context;
     context.save();
-    context.fillStyle = 'rgba(203, 213, 225, 0.85)';
     context.font = '11px ui-monospace, monospace';
 
+    context.fillStyle = CHANNEL_COLOURS[reference.channel];
     context.textAlign = 'right';
     context.textBaseline = 'middle';
     for (let row = 0; row <= VERTICAL_DIVISIONS; row += 1) {
       const fraction = 0.5 - row / VERTICAL_DIVISIONS;
-      const volts = viewport.vCentre + fraction * viewport.vSpan;
+      const volts = vertical.vCentre + fraction * vertical.vSpan;
       const y = plot.top + (plot.height * row) / VERTICAL_DIVISIONS;
       context.fillText(formatEngineering(volts, 'V', 3), plot.left - 8, y);
     }
 
+    context.fillStyle = 'rgba(203, 213, 225, 0.85)';
     context.textAlign = 'center';
     context.textBaseline = 'top';
     for (let column = 0; column <= HORIZONTAL_DIVISIONS; column += 2) {
       const fraction = column / HORIZONTAL_DIVISIONS - 0.5;
-      const seconds = viewport.tCentre + fraction * viewport.tSpan;
+      const seconds = time.tCentre + fraction * time.tSpan;
       const x = plot.left + (plot.width * column) / HORIZONTAL_DIVISIONS;
       context.fillText(formatEngineering(seconds, 's', 3), x, plot.top + plot.height + 8);
+    }
+    context.restore();
+  }
+
+  /** Each captured channel and the volts per division its trace is drawn at. */
+  private drawLegend(plot: {
+    left: number; top: number; width: number; height: number;
+  }): void {
+    const instrument = this.instrument;
+    if (!instrument || this.captures.length === 0) return;
+
+    const context = this.context;
+    context.save();
+    context.font = '11px ui-monospace, monospace';
+    context.textAlign = 'left';
+    context.textBaseline = 'top';
+
+    let y = plot.top + 6;
+    for (const capture of this.captures) {
+      const settings = capture.channel === 1 ? instrument.ch1 : instrument.ch2;
+      context.fillStyle = CHANNEL_COLOURS[capture.channel];
+      context.fillText(
+        `CH${capture.channel}  ${formatEngineering(settings.scaleVPerDiv, 'V', 3)}/div`,
+        plot.left + 8,
+        y,
+      );
+      y += 15;
     }
     context.restore();
   }
@@ -248,18 +299,19 @@ export class Plot {
    */
   private drawTrace(
     plot: { left: number; top: number; width: number; height: number },
-    viewport: { tSpan: number; tCentre: number; vSpan: number; vCentre: number },
+    time: { tSpan: number; tCentre: number },
+    vertical: { vSpan: number; vCentre: number },
     capture: Capture,
   ): void {
     const { times, volts } = capture;
     if (volts.length === 0) return;
 
     const context = this.context;
-    const tMin = viewport.tCentre - viewport.tSpan / 2;
-    const vMax = viewport.vCentre + viewport.vSpan / 2;
+    const tMin = time.tCentre - time.tSpan / 2;
+    const vMax = vertical.vCentre + vertical.vSpan / 2;
 
-    const toX = (t: number): number => plot.left + ((t - tMin) / viewport.tSpan) * plot.width;
-    const toY = (v: number): number => plot.top + ((vMax - v) / viewport.vSpan) * plot.height;
+    const toX = (t: number): number => plot.left + ((t - tMin) / time.tSpan) * plot.width;
+    const toY = (v: number): number => plot.top + ((vMax - v) / vertical.vSpan) * plot.height;
 
     context.save();
     context.beginPath();
@@ -309,7 +361,7 @@ export class Plot {
   /** Crosshair plus a readout of the sample under the pointer. */
   private drawCursor(
     plot: { left: number; top: number; width: number; height: number },
-    viewport: { tSpan: number; tCentre: number; vSpan: number; vCentre: number },
+    time: { tSpan: number; tCentre: number },
   ): void {
     const pointer = this.pointer;
     if (!pointer) return;
@@ -333,13 +385,13 @@ export class Plot {
     context.stroke();
     context.restore();
 
-    const tMin = viewport.tCentre - viewport.tSpan / 2;
-    const time = tMin + ((pointer.x - plot.left) / plot.width) * viewport.tSpan;
+    const tMin = time.tCentre - time.tSpan / 2;
+    const at = tMin + ((pointer.x - plot.left) / plot.width) * time.tSpan;
 
-    const parts = [`t = ${formatEngineering(time, 's', 4)}`];
+    const parts = [`t = ${formatEngineering(at, 's', 4)}`];
     for (const capture of this.captures) {
       const index = Math.round(
-        (time - capture.preamble.xZero) / capture.preamble.xIncr + capture.preamble.ptOff,
+        (at - capture.preamble.xZero) / capture.preamble.xIncr + capture.preamble.ptOff,
       );
       const value = capture.volts[index];
       if (value !== undefined) {
