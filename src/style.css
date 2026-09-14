@@ -1,0 +1,499 @@
+/*
+ * One dark theme, not two. A lab bench is usually dim and the instrument's own
+ * screen is dark, so a light variant would be the odd one out rather than a
+ * courtesy - and the trace colours are chosen against this background.
+ */
+
+:root {
+  --bg: #0b1220;
+  --surface: #131c2e;
+  --surface-raised: #1b2740;
+  --border: #27344d;
+  --text: #e2e8f0;
+  --text-dim: #94a3b8;
+  --accent: #38bdf8;
+  --ch1: #f2c744;
+  --ch2: #4fd0e7;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --error: #f87171;
+  --radius: 10px;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0 0 3rem;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+h1, h2, h3 {
+  margin: 0;
+  line-height: 1.25;
+}
+
+code {
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  font-size: 0.9em;
+  background: var(--surface-raised);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+a {
+  color: var(--accent);
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip-link:focus {
+  left: 1rem;
+  top: 1rem;
+  z-index: 10;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: #06121e;
+  border-radius: var(--radius);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* -------------------------------------------------------------- header --- */
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem clamp(1rem, 3vw, 2.5rem);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.page-header h1 {
+  font-size: clamp(1.25rem, 2.5vw, 1.6rem);
+}
+
+.tagline {
+  margin: 0.35rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.connection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.identity {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  font-family: ui-monospace, monospace;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  font-size: 0.85rem;
+}
+
+.status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.status-pill[data-status='connected'] .status-dot { background: var(--ok); }
+.status-pill[data-status='connecting'] .status-dot { background: var(--warn); }
+.status-pill[data-status='unsupported'] .status-dot { background: var(--error); }
+
+/* ------------------------------------------------------------- buttons --- */
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  padding: 0.5rem 1rem;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.primary-button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06121e;
+  font-weight: 600;
+}
+
+.primary-button:hover:not(:disabled) { background: #7dd3fc; }
+
+.secondary-button {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.secondary-button:hover:not(:disabled) { border-color: var(--accent); }
+
+.ghost-button {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.inline-field select {
+  font: inherit;
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+}
+
+/* ------------------------------------------------------------- banners --- */
+
+.banner {
+  margin: 1rem clamp(1rem, 3vw, 2.5rem) 0;
+  padding: 0.85rem 1.1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.banner-error {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.banner-info {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+/* ------------------------------------------------------------ sections --- */
+
+main {
+  display: grid;
+  gap: 1.5rem;
+  padding: 1.5rem clamp(1rem, 3vw, 2.5rem) 0;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+main > section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.section-head h2 {
+  font-size: 1.05rem;
+}
+
+.section-note {
+  margin: 0.4rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  max-width: 72ch;
+}
+
+/* ---------------------------------------------------------------- plot --- */
+
+.plot-frame {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #0b1220;
+}
+
+#plot {
+  display: block;
+  width: 100%;
+  height: clamp(260px, 42vh, 460px);
+  touch-action: none;
+}
+
+.plot-readout {
+  margin: 0.5rem 0 0;
+  min-height: 1.4em;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
+.capture-stats {
+  margin: 0.5rem 0 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+
+/* ------------------------------------------------------------ controls --- */
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 1rem;
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem 1.2rem;
+}
+
+/* A stripe in the channel's trace colour, so panel and trace are linked. */
+.panel[data-accent='ch1'] { border-top: 3px solid var(--ch1); }
+.panel[data-accent='ch2'] { border-top: 3px solid var(--ch2); }
+
+.panel-title {
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.85rem;
+}
+
+.control-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.7rem;
+}
+
+.control-row-slider {
+  grid-template-columns: 1fr;
+  gap: 0.25rem;
+}
+
+.control-row-toggle {
+  grid-template-columns: auto 1fr;
+  justify-content: start;
+}
+
+.control-label {
+  color: var(--text-dim);
+  font-size: 0.86rem;
+}
+
+.control-select {
+  font: inherit;
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  min-width: 8.5rem;
+}
+
+.control-slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.control-value {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+  text-align: right;
+}
+
+.control-row-slider .control-value {
+  text-align: left;
+}
+
+.control-toggle {
+  accent-color: var(--accent);
+  width: 1rem;
+  height: 1rem;
+}
+
+/* -------------------------------------------------------- measurements --- */
+
+.measurement-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.measurement-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.measurement-label {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.measurement-value {
+  font-family: ui-monospace, monospace;
+  font-size: 1.15rem;
+  /* Tabular figures stop the readout jittering as digits change during a poll. */
+  font-variant-numeric: tabular-nums;
+}
+
+.measurement-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.measurement-chooser legend {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  padding: 0 0.4rem;
+}
+
+.measurement-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.86rem;
+}
+
+.measurement-choice input {
+  accent-color: var(--accent);
+}
+
+/* ---------------------------------------------------------- screenshot --- */
+
+.screenshot-frame {
+  margin-top: 1rem;
+}
+
+.screenshot-image {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  /* The scope renders a small bitmap; smoothing it makes the text mushy. */
+  image-rendering: pixelated;
+}
+
+/* ------------------------------------------------------------- console --- */
+
+.raw-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.raw-entry input {
+  flex: 1 1 18rem;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+}
+
+.log {
+  margin-top: 0.75rem;
+  height: 15rem;
+  overflow-y: auto;
+  background: #08101c;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 1.2rem 1fr;
+  gap: 0.4rem;
+  padding: 0.1rem 0;
+}
+
+.log-marker { color: var(--text-dim); }
+.log-text { white-space: pre-wrap; word-break: break-word; }
+
+.log-tx .log-text { color: var(--accent); }
+.log-rx .log-text { color: var(--ok); }
+.log-info .log-text { color: var(--text-dim); }
+.log-error .log-marker,
+.log-error .log-text { color: var(--error); }
+
+/* -------------------------------------------------------------- footer --- */
+
+.page-footer {
+  max-width: 1400px;
+  margin: 2rem auto 0;
+  padding: 0 clamp(1rem, 3vw, 2.5rem);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}

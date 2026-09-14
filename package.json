@@ -1,0 +1,20 @@
+{
+  "name": "tektronix-oscilloscope",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Browser control panel for the Tektronix TBS1072B-EDU oscilloscope over WebUSB/USBTMC",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/w3c-web-usb": "^1.0.10",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^3.2.4"
+  }
+}

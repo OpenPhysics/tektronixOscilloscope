@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TBS1072B-EDU Oscilloscope Control</title>
+  <meta name="description"
+        content="Capture and save waveforms from a Tektronix TBS1072B-EDU oscilloscope in the browser over WebUSB." />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#controls">Skip to controls</a>
+
+  <header class="page-header">
+    <div class="page-header-text">
+      <h1>Tektronix TBS1072B-EDU</h1>
+      <p class="tagline">Drive the oscilloscope from your browser over WebUSB, and save what it measures.</p>
+    </div>
+    <div class="connection">
+      <span class="status-pill" id="status-pill" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="status-text">Not connected</span>
+      </span>
+      <span class="identity" id="identity-text"></span>
+      <button type="button" id="connect-button" class="primary-button">Connect</button>
+    </div>
+  </header>
+
+  <!-- Shown only when the browser has no WebUSB API. -->
+  <div class="banner banner-error" id="unsupported-banner" hidden>
+    <strong>This browser cannot talk to the instrument.</strong>
+    The WebUSB API is required, and is available in desktop
+    <strong>Chrome</strong> and <strong>Edge</strong> (and Chromium derivatives).
+    Firefox and Safari do not implement it, and neither do browsers on iOS.
+    You can still explore the controls below — nothing will be sent to any hardware.
+  </div>
+
+  <div class="banner banner-info" id="insecure-banner" hidden>
+    <strong>WebUSB needs a secure page.</strong>
+    Open this page over <code>https://</code> or on <code>localhost</code>.
+  </div>
+
+  <div class="banner banner-info">
+    <strong>First time?</strong>
+    The scope must be bound to the WinUSB driver before any browser can see it,
+    and its rear port must be set to <em>Utility → Options → USB Device Port → Computer</em>.
+    See <a href="https://github.com/OpenPhysics/TektronixOscilloscope/blob/main/docs/SETUP.md">docs/SETUP.md</a>.
+  </div>
+
+  <main>
+    <section class="plot-section" aria-labelledby="plot-heading">
+      <div class="section-head">
+        <h2 id="plot-heading">Waveform</h2>
+        <p class="section-note">
+          Every point here came off the instrument: 2500 samples per channel,
+          scaled by the preamble captured with them. The graticule matches the
+          scope's own screen — ten divisions across, eight down.
+        </p>
+      </div>
+
+      <div class="plot-frame">
+        <canvas id="plot" aria-label="Captured waveform"></canvas>
+      </div>
+      <p class="plot-readout" id="plot-readout" role="status" aria-live="off"></p>
+      <pre class="capture-stats" id="capture-stats"></pre>
+
+      <div class="button-row">
+        <button type="button" id="capture-button" class="primary-button">Capture</button>
+        <button type="button" id="single-button" class="secondary-button"
+                title="Arm the scope for one acquisition, then stop">Single</button>
+        <button type="button" id="run-stop-button" class="secondary-button">Run / Stop</button>
+        <button type="button" id="export-csv" class="secondary-button">Save CSV</button>
+        <button type="button" id="export-png" class="secondary-button">Save plot PNG</button>
+      </div>
+    </section>
+
+    <section class="measure-section" aria-labelledby="measure-heading">
+      <div class="section-head">
+        <h2 id="measure-heading">Measurements</h2>
+        <p class="section-note">
+          Taken by the instrument itself over the whole acquisition, not computed
+          from the transferred record — so they will differ slightly from the
+          statistics under the plot. That difference is real, not a bug.
+        </p>
+      </div>
+
+      <div class="button-row">
+        <label class="inline-field">
+          Channel
+          <select id="active-channel" aria-label="Channel to measure">
+            <option value="1">CH1</option>
+            <option value="2">CH2</option>
+          </select>
+        </label>
+        <button type="button" id="measure-button" class="secondary-button">Read now</button>
+        <label class="inline-field">
+          <input type="checkbox" id="live-measure" />
+          Poll every second
+        </label>
+      </div>
+
+      <div id="measurements"></div>
+    </section>
+
+    <section id="controls" class="controls" aria-label="Front panel controls"></section>
+
+    <section class="screenshot-section" aria-labelledby="screenshot-heading">
+      <div class="section-head">
+        <h2 id="screenshot-heading">Instrument screen</h2>
+        <p class="section-note">
+          The oscilloscope's own display, transferred over USB — useful when you
+          want the lab report to show what was actually on the bench.
+        </p>
+      </div>
+      <div class="button-row">
+        <button type="button" id="screenshot-button" class="secondary-button">Capture screen</button>
+        <button type="button" id="export-screenshot" class="secondary-button">Save image</button>
+      </div>
+      <div id="screenshot" class="screenshot-frame"></div>
+    </section>
+
+    <section class="console-section" aria-labelledby="console-heading">
+      <div class="section-head">
+        <h2 id="console-heading">Command console</h2>
+        <p class="section-note">
+          Everything exchanged with the instrument. Commands are SCPI over
+          USBTMC: <code>CH1:SCALE 5.0E-1</code> sets channel 1 to 500 mV/div,
+          and anything ending in <code>?</code> is treated as a query.
+        </p>
+      </div>
+
+      <div class="raw-entry">
+        <label for="raw-input" class="visually-hidden">Raw command</label>
+        <input type="text" id="raw-input" placeholder="Type a SCPI command, e.g. MEASUREMENT:IMMED:VALUE?"
+               autocomplete="off" spellcheck="false" />
+        <button type="button" id="raw-send" class="secondary-button">Send</button>
+        <button type="button" id="readback-button" class="secondary-button"
+                title="Ask the instrument for its current settings and adopt them">
+          Read from instrument
+        </button>
+        <button type="button" id="push-all-button" class="secondary-button"
+                title="Send every setting again, to resynchronise after using the front panel">
+          Push all settings
+        </button>
+        <button type="button" id="log-clear" class="ghost-button">Clear</button>
+      </div>
+
+      <div class="log" id="log" role="log" aria-label="Instrument command log"></div>
+    </section>
+  </main>
+
+  <footer class="page-footer">
+    <p>
+      The TBS1072B has no USB-serial bridge inside it — it is a native USBTMC
+      device — so this page uses the <strong>WebUSB API</strong> and speaks the
+      USBTMC bulk protocol directly. Settings are remembered in this browser
+      only; captures are held in memory until you save them.
+    </p>
+  </footer>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
