@@ -52,7 +52,11 @@ function selectRow<T extends string | number>(
   label: string,
   options: readonly Option<T>[],
   onChange: (value: T) => void,
-): { row: HTMLElement; select: HTMLSelectElement } {
+): {
+  row: HTMLElement;
+  select: HTMLSelectElement;
+  setOptions: (next: readonly Option<T>[]) => void;
+} {
   const id = nextId('select');
   const row = document.createElement('div');
   row.className = 'control-row';
@@ -65,20 +69,34 @@ function selectRow<T extends string | number>(
   const select = document.createElement('select');
   select.id = id;
   select.className = 'control-select';
-  for (const option of options) {
-    const element = document.createElement('option');
-    element.value = String(option.value);
-    element.textContent = option.label;
-    select.append(element);
-  }
+
+  // A `<select>` only ever hands back a string, so the typed value has to be
+  // recovered from this list. It is rebuilt alongside the DOM options rather
+  // than captured once: the V/div ladder is filled in after construction, and a
+  // stale list here means `change` finds no match and the control silently does
+  // nothing.
+  let current: readonly Option<T>[] = [];
+
+  const setOptions = (next: readonly Option<T>[]): void => {
+    current = next;
+    select.replaceChildren();
+    for (const option of next) {
+      const element = document.createElement('option');
+      element.value = String(option.value);
+      element.textContent = option.label;
+      select.append(element);
+    }
+  };
+  setOptions(options);
+
   select.addEventListener('change', () => {
     const raw = select.value;
-    const match = options.find((option) => String(option.value) === raw);
+    const match = current.find((option) => String(option.value) === raw);
     if (match) onChange(match.value);
   });
 
   row.append(labelElement, select);
-  return { row, select };
+  return { row, select, setOptions };
 }
 
 function sliderRow(
@@ -163,6 +181,7 @@ export class ChannelPanel {
   readonly root: HTMLElement;
   private readonly enabled: HTMLInputElement;
   private readonly scale: HTMLSelectElement;
+  private readonly setScaleOptions: (options: readonly Option<number>[]) => void;
   private readonly position: HTMLInputElement;
   private readonly positionValue: HTMLElement;
   private readonly coupling: HTMLSelectElement;
@@ -185,6 +204,7 @@ export class ChannelPanel {
       });
     });
     this.scale = scale.select;
+    this.setScaleOptions = scale.setOptions;
 
     const limit = VERTICAL_DIVISIONS / 2;
     const position = sliderRow(
@@ -247,13 +267,7 @@ export class ChannelPanel {
     const options = verticalScaleOptions(channel.probeAttenuation);
     const wanted = options.map((option) => String(option.value)).join('|');
     if (this.scale.dataset['ladder'] !== wanted) {
-      this.scale.replaceChildren();
-      for (const option of options) {
-        const element = document.createElement('option');
-        element.value = String(option.value);
-        element.textContent = option.label;
-        this.scale.append(element);
-      }
+      this.setScaleOptions(options);
       this.scale.dataset['ladder'] = wanted;
     }
 
