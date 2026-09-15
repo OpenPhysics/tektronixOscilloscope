@@ -23,6 +23,7 @@
       </span>
       <span class="identity" id="identity-text"></span>
       <button type="button" id="connect-button" class="primary-button">Connect</button>
+      <button type="button" id="help-button" class="secondary-button">Need help connecting?</button>
     </div>
   </header>
 
@@ -41,10 +42,11 @@
   </div>
 
   <div class="banner banner-info">
-    <strong>First time?</strong>
-    The scope must be bound to the WinUSB driver before any browser can see it,
-    and its rear port must be set to <em>Utility → Options → USB Device Port → Computer</em>.
-    See <a href="https://github.com/OpenPhysics/tektronixOscilloscope/blob/main/docs/SETUP.md">docs/SETUP.md</a>.
+    <strong>First time on this computer?</strong>
+    Windows needs the WinUSB driver bound once before any browser can see the scope.
+    ChromeOS, macOS and Linux need little or nothing. On every system the scope's rear
+    port must be set to <em>Utility → Options → USB Device Port → Computer</em>.
+    <button type="button" id="help-banner-button" class="link-button">Show me what to do</button>
   </div>
 
   <main>
@@ -157,6 +159,209 @@
       only; captures are held in memory until you save them.
     </p>
   </footer>
+
+  <!-- Connection help. Opened by #help-button; see src/ui/help.ts. -->
+  <dialog id="help-dialog" class="help-dialog" aria-labelledby="help-heading">
+    <div class="help-head">
+      <h2 id="help-heading">Nothing in the device chooser?</h2>
+      <form method="dialog">
+        <button type="submit" class="ghost-button help-close" aria-label="Close help">&#10005;</button>
+      </form>
+    </div>
+
+    <p class="help-lede">
+      Pressing <strong>Connect</strong> hands over to Chrome's own device chooser.
+      If that list comes up empty, the browser cannot see the instrument yet &mdash;
+      which is the normal state of affairs until the steps for your system have been
+      done once on this computer.
+    </p>
+
+    <div class="help-tabs" role="tablist" aria-label="Operating system">
+      <button type="button" class="help-tab" role="tab" data-platform="windows"
+              id="help-tab-windows" aria-controls="help-panel-windows">Windows</button>
+      <button type="button" class="help-tab" role="tab" data-platform="macos"
+              id="help-tab-macos" aria-controls="help-panel-macos">macOS</button>
+      <button type="button" class="help-tab" role="tab" data-platform="chromeos"
+              id="help-tab-chromeos" aria-controls="help-panel-chromeos">ChromeOS</button>
+      <button type="button" class="help-tab" role="tab" data-platform="linux"
+              id="help-tab-linux" aria-controls="help-panel-linux">Linux</button>
+    </div>
+
+    <!-- ------------------------------------------------------------ Windows -->
+    <section class="help-panel" data-platform-panel="windows" id="help-panel-windows"
+             role="tabpanel" aria-labelledby="help-tab-windows" hidden>
+      <h3>Bind the WinUSB driver &mdash; once per computer</h3>
+      <p>
+        Windows lets no browser touch a USB instrument unless the generic
+        <strong>WinUSB</strong> driver is bound to it, and it ships nothing for
+        test equipment. Until this is done the scope sits in Device Manager under
+        <em>Other devices</em> with a yellow warning triangle and problem code 28,
+        <em>the drivers for this device are not installed</em>. Because there is no
+        driver bound in the first place, binding one displaces nothing &mdash; and
+        it is reversible.
+      </p>
+      <p class="help-note">
+        Either route below does the same job. <strong>A</strong> needs no download,
+        which matters on a managed or school machine; <strong>B</strong> is fewer
+        clicks if you can run a downloaded program.
+      </p>
+
+      <div class="help-methods">
+        <article class="help-method">
+          <h4><span class="help-badge">A</span> Device Manager</h4>
+          <p class="help-note">Windows already carries the driver. Nothing to download.</p>
+          <ol>
+            <li>Press <kbd>Win</kbd>+<kbd>X</kbd> and choose <strong>Device Manager</strong>.</li>
+            <li>Find <strong>Tektronix TBS 1072B-EDU</strong>, most likely under
+                <em>Other devices</em> with a warning triangle.</li>
+            <li>Right-click it &rarr; <strong>Update driver</strong>.</li>
+            <li><strong>Browse my computer for drivers</strong>.</li>
+            <li><strong>Let me pick from a list of available drivers on my computer</strong>.</li>
+            <li>Choose the device class <strong>Universal Serial Bus devices</strong>.</li>
+            <li>Manufacturer <strong>WinUsb Device</strong>, model
+                <strong>WinUsb Device</strong>, then <strong>Next</strong>.</li>
+          </ol>
+        </article>
+
+        <article class="help-method">
+          <h4><span class="help-badge">B</span> Zadig</h4>
+          <p class="help-note">
+            A single portable <code>.exe</code> that binds the same driver. Nothing is
+            installed: <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">zadig.akeo.ie</a>
+          </p>
+          <ol>
+            <li>Download Zadig and run it <strong>as Administrator</strong>.</li>
+            <li><strong>Options &rarr; List All Devices</strong>.</li>
+            <li>Pick <strong>Tektronix TBS 1072B-EDU</strong> from the dropdown.</li>
+            <li>Check the USB ID line reads <code>0699&nbsp;0368</code> &mdash; that is
+                this instrument.</li>
+            <li>Set the target driver, the right-hand box with the green arrow, to
+                <strong>WinUSB</strong>.</li>
+            <li>Click <strong>Install Driver</strong> and wait; it can take a minute.</li>
+          </ol>
+        </article>
+      </div>
+
+      <p class="help-finish">
+        Either way: come back here and press <strong>Connect</strong> again. The scope
+        will be in the chooser.
+      </p>
+
+      <details>
+        <summary>Check that it worked</summary>
+        <p class="help-note">In PowerShell:</p>
+        <pre class="help-pre">Get-PnpDevice | Where-Object InstanceId -like '*VID_0699*' |
+  Format-List Status, Class, FriendlyName</pre>
+        <p class="help-note">
+          You want <code class="help-good">Status: OK</code> and
+          <code class="help-good">Class: USBDevice</code>. Before the bind it reads
+          <code>Status: Error</code> with an empty class.
+        </p>
+      </details>
+
+      <details>
+        <summary>Undoing it</summary>
+        <p class="help-note">
+          Device Manager &rarr; right-click the scope &rarr; <strong>Uninstall device</strong>,
+          tick <em>Delete the driver software for this device</em>, then unplug and replug.
+          Windows re-enumerates it bare, and Tektronix's own TekVISA or OpenChoice can
+          claim it again.
+        </p>
+      </details>
+    </section>
+
+    <!-- -------------------------------------------------------------- macOS -->
+    <section class="help-panel" data-platform-panel="macos" id="help-panel-macos"
+             role="tabpanel" aria-labelledby="help-tab-macos" hidden>
+      <h3>Nothing to install</h3>
+      <p>
+        macOS has no driver of its own for test instruments, which is exactly what
+        WebUSB wants: Chrome claims the interface directly. Plug the scope into the
+        rear <em>Device</em> port, press <strong>Connect</strong>, and choose it from
+        the list.
+      </p>
+      <p class="help-note">
+        If it is still missing, the cause is almost always the instrument rather than
+        the Mac &mdash; work through the checklist below. The one macOS-specific
+        possibility: a VISA runtime installed for other lab software (NI-VISA, TekVISA)
+        can claim the instrument first. Quitting that software, or removing the
+        runtime, hands it back to the browser.
+      </p>
+    </section>
+
+    <!-- ----------------------------------------------------------- ChromeOS -->
+    <section class="help-panel" data-platform-panel="chromeos" id="help-panel-chromeos"
+             role="tabpanel" aria-labelledby="help-tab-chromeos" hidden>
+      <h3>Nothing to install</h3>
+      <p>
+        ChromeOS needs no setup whatsoever &mdash; no driver, no permissions, no flags.
+        Plug the scope into the Chromebook, press <strong>Connect</strong>, and pick it
+        from the chooser. This is the least trouble of any platform, which is worth
+        knowing if you are choosing hardware for a class.
+      </p>
+      <p class="help-note">
+        An empty chooser here points at the instrument's own settings or the cable.
+        See the checklist below.
+      </p>
+    </section>
+
+    <!-- -------------------------------------------------------------- Linux -->
+    <section class="help-panel" data-platform-panel="linux" id="help-panel-linux"
+             role="tabpanel" aria-labelledby="help-tab-linux" hidden>
+      <h3>One udev rule</h3>
+      <p>
+        The kernel needs no driver for this, but the device node it creates belongs to
+        root, so Chrome cannot open it as you. Grant access once:
+      </p>
+      <pre class="help-pre">echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="0699", ATTR{idProduct}=="0368", MODE="0666"' \
+  | sudo tee /etc/udev/rules.d/99-tektronix.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --attr-match=idVendor=0699</pre>
+      <p class="help-note">
+        That last line applies the rule to a scope which is already plugged in, by
+        replaying a change event against it. Without it you would have to unplug and
+        replug before the new permissions took hold.
+      </p>
+      <details>
+        <summary>It shows up in the chooser, but connecting fails</summary>
+        <p class="help-note">
+          Then the rule worked and something else is holding the interface &mdash;
+          usually the kernel's own <code>usbtmc</code> module, which claims exactly this
+          class of device. <code>lsmod | grep usbtmc</code> will say, and
+          <code>sudo modprobe -r usbtmc</code> releases the instrument to the browser.
+        </p>
+      </details>
+    </section>
+
+    <!-- ------------------------------------------------ common to all of them -->
+    <section class="help-checklist">
+      <h3>Still nothing? Check the instrument itself</h3>
+      <ul>
+        <li>
+          The cable belongs in the <strong>rear</strong> USB <em>Device</em> port, the
+          squarish type-B socket. The front port is a host port for flash drives and
+          will never work for this.
+        </li>
+        <li>
+          On the front panel:
+          <strong>Utility &rarr; Options &rarr; USB Device Port &rarr; Computer</strong>.
+          The alternative, <em>Printer</em>, puts the scope in PictBridge mode and
+          USBTMC disappears entirely.
+        </li>
+        <li>The scope must be switched on and finished booting before you press Connect.</li>
+        <li>
+          Use desktop <strong>Chrome</strong> or <strong>Edge</strong>. Firefox and Safari
+          do not implement WebUSB, and no browser on iOS does.
+        </li>
+        <li>The page has to be on <code>https://</code> or <code>localhost</code>.</li>
+      </ul>
+      <p class="help-note">
+        The long version of all of this is in
+        <a href="https://github.com/OpenPhysics/tektronixOscilloscope/blob/main/docs/SETUP.md"
+           target="_blank" rel="noopener">docs/SETUP.md</a>.
+      </p>
+    </section>
+  </dialog>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

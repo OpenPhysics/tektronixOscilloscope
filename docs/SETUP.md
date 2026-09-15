@@ -21,19 +21,43 @@ disappears from Windows, and Chrome cannot see it.
 
 ---
 
-## 1. Bind WinUSB with Zadig (for the web page)
+## 1. Bind WinUSB (for the web page)
+
+First, whichever route you take: plug in the scope, switch it on, and confirm the rear
+USB Device port is set to talk to a computer — front panel **Utility → Options → USB
+Device Port → Computer**. The alternative, *Printer*, puts it in PictBridge mode and
+USBTMC goes away entirely.
+
+There are two ways to bind the driver and they end in the same place. Route A needs no
+download, which is what you want on a managed or school machine; route B is fewer clicks
+where running a downloaded program is no obstacle. The page offers both under its
+**Need help connecting?** button, so this section and that dialog stay in step.
+
+### A. Device Manager, using the driver Windows already has
+
+Windows ships `winusb.inf` in-box (`C:\Windows\INF\winusb.inf`, class `USBDevice`), and
+it carries a generic *WinUsb Device* entry you can select by hand. Nothing is downloaded
+and nothing is signed, because Microsoft signed it already.
+
+1. Press <kbd>Win</kbd>+<kbd>X</kbd> and choose **Device Manager**.
+2. Find **Tektronix TBS 1072B-EDU**, most likely under *Other devices* with a yellow
+   warning triangle.
+3. Right-click it → **Update driver**.
+4. **Browse my computer for drivers**.
+5. **Let me pick from a list of available drivers on my computer**.
+6. Choose the device class **Universal Serial Bus devices**.
+7. Manufacturer **WinUsb Device**, model **WinUsb Device**, then **Next**.
+
+### B. Zadig
 
 1. Download Zadig from <https://zadig.akeo.ie/>. It is a single portable `.exe`; nothing
    is installed.
-2. Plug in the scope and switch it on. Confirm the rear USB Device port is set to talk to
-   a computer: front panel **Utility → Options → USB Device Port → Computer** (the
-   alternative, *Printer*, puts it in PictBridge mode and USBTMC goes away).
-3. Run Zadig as Administrator.
-4. **Options → List All Devices**.
-5. Pick **Tektronix TBS 1072B-EDU** from the dropdown. Check that the USB ID line reads
+2. Run Zadig as Administrator.
+3. **Options → List All Devices**.
+4. Pick **Tektronix TBS 1072B-EDU** from the dropdown. Check that the USB ID line reads
    `0699 0368` — that is this instrument, confirmed on this machine.
-6. Set the target driver (the right-hand box, with the green arrow) to **WinUSB**.
-7. Click **Install Driver** and wait. It takes up to a minute.
+5. Set the target driver (the right-hand box, with the green arrow) to **WinUSB**.
+6. Click **Install Driver** and wait. It takes up to a minute.
 
 Verify from WSL:
 
@@ -42,12 +66,14 @@ powershell.exe -NoProfile -Command \
   "Get-PnpDevice | Where-Object InstanceId -like '*VID_0699*' | Format-List Status,Class,FriendlyName"
 ```
 
-You want `Status: OK` and `Class: USBDevice`. Before Zadig this reads `Status: Error`
-with an empty class.
+You want `Status: OK` and `Class: USBDevice`. Before the bind this reads `Status: Error`
+with an empty class, and `DEVPKEY_Device_ProblemCode` is 28 — *the drivers for this device
+are not installed*. That is the state a fresh scope arrives in, so binding WinUSB
+displaces nothing.
 
 ### Undoing it
 
-Zadig is reversible. If you later install TekVISA or OpenChoice and want them to see the
+Either route is reversible. If you later install TekVISA or OpenChoice and want them to see the
 scope again: Device Manager → find the scope under *Universal Serial Bus devices* →
 right-click → **Uninstall device**, tick *Delete the driver software for this device* →
 unplug and replug. Windows then re-enumerates it bare, and the Tektronix installer can
@@ -57,8 +83,9 @@ claim it.
 
 ## 2. Attach to WSL2 with usbipd (for `tools/probe.py`)
 
-`usbipd-win` is already installed here (5.3.0). The prober runs in Linux, where USBTMC
-needs no special driver at all.
+`usbipd-win` is a separate install from <https://github.com/dorssel/usbipd-win/releases>;
+check whether this machine has it with `usbipd --version` in PowerShell. The prober runs in
+Linux, where USBTMC needs no special driver at all.
 
 From an **Administrator** PowerShell on Windows:
 

@@ -23,6 +23,7 @@ import { downloadBytes, downloadCanvas, downloadText } from './export/download.t
 import { Store, type AppState } from './state.ts';
 import { buildPanels } from './ui/controls.ts';
 import { formatEngineering, timestampForFilename } from './ui/format.ts';
+import { HelpDialog, currentPlatform } from './ui/help.ts';
 import { CommandLog } from './ui/log.ts';
 import { MeasurementPanel } from './ui/measurements.ts';
 import { Plot } from './ui/plot.ts';
@@ -43,6 +44,7 @@ const statusText = need('status-text');
 const statusPill = need('status-pill');
 const identityText = need('identity-text');
 const connectButton = need<HTMLButtonElement>('connect-button');
+const help = new HelpDialog(need<HTMLDialogElement>('help-dialog'));
 
 const plot = new Plot(need<HTMLCanvasElement>('plot'), need('plot-readout'));
 const measurementPanel = new MeasurementPanel(need('measurements'), store);
@@ -271,6 +273,10 @@ function onStateChanged(next: AppState, prev: AppState): void {
 }
 store.subscribe(onStateChanged);
 
+for (const id of ['help-button', 'help-banner-button']) {
+  need(id).addEventListener('click', () => help.open(currentPlatform()));
+}
+
 connectButton.addEventListener('click', () => {
   if (transport.isConnected) {
     run(() => transport.disconnect());
@@ -281,8 +287,14 @@ connectButton.addEventListener('click', () => {
     .connect()
     .then(onConnected)
     .catch((error: unknown) => {
-      // The user closing the device picker is a normal outcome, not a failure.
-      if (error instanceof Error && error.name === 'NotFoundError') return;
+      // NotFoundError covers both "the user closed the chooser" and "the chooser
+      // had nothing in it to choose", which WebUSB gives no way to tell apart.
+      // Neither deserves an error, but the second is where people get stuck, so
+      // name the way out instead of failing silently.
+      if (error instanceof Error && error.name === 'NotFoundError') {
+        log.add('info', 'no instrument chosen. If the chooser was empty, see "Need help connecting?"');
+        return;
+      }
       reportError(error);
     });
 });

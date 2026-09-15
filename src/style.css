@@ -492,6 +492,203 @@ main > section {
   font-size: 0.85rem;
 }
 
+/* --------------------------------------------------------- help dialog --- */
+
+/*
+ * A button that reads as a link. The first-time banner needs one: "show me what
+ * to do" opens a dialog rather than navigating, so it must be a button for the
+ * keyboard and for screen readers, while still looking like the sentence it
+ * sits in.
+ */
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+}
+
+.help-dialog {
+  width: min(58rem, calc(100vw - 2rem));
+  max-height: min(85vh, 56rem);
+  overflow-y: auto;
+  padding: 1.4rem clamp(1rem, 3vw, 1.9rem) 1.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.help-dialog::backdrop {
+  background: rgba(4, 9, 18, 0.72);
+}
+
+.help-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.help-close {
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.35rem 0.6rem;
+}
+
+.help-lede {
+  margin: 0.7rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.help-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 1.1rem;
+}
+
+.help-tab {
+  background: var(--surface-raised);
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  padding: 0.4rem 0.95rem;
+}
+
+.help-tab.is-active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.help-panel,
+.help-checklist {
+  margin-top: 1.2rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1.2rem;
+}
+
+.help-panel[hidden] {
+  display: none;
+}
+
+.help-panel h3,
+.help-checklist h3 {
+  font-size: 1rem;
+}
+
+.help-panel p,
+.help-checklist p {
+  margin: 0.7rem 0;
+  font-size: 0.92rem;
+}
+
+.help-panel ol,
+.help-panel ul,
+.help-checklist ul {
+  margin: 0.6rem 0;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+}
+
+.help-panel li,
+.help-checklist li {
+  margin: 0.35rem 0;
+}
+
+.help-note {
+  color: var(--text-dim);
+}
+
+.help-good {
+  color: var(--ok);
+}
+
+/*
+ * The two Windows routes, side by side where there is room. They are genuine
+ * alternatives rather than a sequence, and stacking them vertically with no
+ * frame around each reliably reads as "do A, then B" - which would send people
+ * off to download a program they did not need.
+ */
+.help-methods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.9rem;
+  margin-top: 0.9rem;
+}
+
+.help-method {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  padding: 0.9rem 1.1rem 1.1rem;
+}
+
+.help-method h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.help-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #06121e;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.help-finish {
+  margin-top: 1rem;
+  padding: 0.7rem 0.9rem;
+  border-left: 3px solid var(--accent);
+  background: rgba(56, 189, 248, 0.08);
+  border-radius: 0 6px 6px 0;
+}
+
+.help-pre {
+  margin: 0.6rem 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.help-dialog details {
+  margin-top: 0.9rem;
+}
+
+.help-dialog summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.92rem;
+}
+
+.help-dialog kbd {
+  padding: 0.1em 0.4em;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-raised);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
