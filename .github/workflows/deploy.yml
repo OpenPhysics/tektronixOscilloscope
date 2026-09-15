@@ -38,12 +38,13 @@ jobs:
 
       # vite.config.ts defaults `base` to the repo path, which is what a project
       # site needs. configure-pages reports the real base_path, so honour it and
-      # the site keeps working even if the repo is renamed or moved to a custom
-      # domain (where base_path is empty).
+      # the site keeps working even if the repo is renamed. If that output is
+      # missing or empty the config keeps its own default rather than building
+      # for the domain root, which would 404 every asset.
       - name: Build
         run: npx vite build
         env:
-          VITE_BASE: ${{ steps.pages.outputs.base_path }}/
+          VITE_BASE: ${{ steps.pages.outputs.base_path }}
 
       - uses: actions/upload-pages-artifact@v5
         with:

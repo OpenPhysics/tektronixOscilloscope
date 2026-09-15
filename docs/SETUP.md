@@ -165,7 +165,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173/TektronixOscilloscope/> in **Windows Chrome or Edge**. WSL2
+Open <http://localhost:5173/tektronixOscilloscope/> in **Windows Chrome or Edge**. WSL2
 forwards localhost, so the dev server running in Linux is reachable from the Windows
 browser, and `localhost` counts as a secure context for WebUSB.
 

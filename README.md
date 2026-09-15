@@ -64,14 +64,14 @@ Some things worth being clear about:
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173/TektronixOscilloscope/
+npm run dev        # http://localhost:5173/tektronixOscilloscope/
 npm run typecheck
 npm test
 npm run build
 ```
 
 The dev server runs happily in WSL2 with the browser on the Windows side — WSL forwards
-localhost, and localhost is a secure context. Note the `/TektronixOscilloscope/` path:
+localhost, and localhost is a secure context. Note the `/tektronixOscilloscope/` path:
 `base` is set for project-site hosting, so the bare root will 404.
 
 | File | Role |
