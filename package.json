@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck",
     "test": "vitest run"
   },
   "devDependencies": {
