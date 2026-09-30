@@ -87,8 +87,12 @@ localhost, and localhost is a secure context. Note the `/tektronixOscilloscope/`
 | `src/ui/plot.ts` | Canvas waveform display with cursor readout |
 | `src/ui/controls.ts` | Channel, horizontal, trigger and acquisition panels |
 | `src/ui/measurements.ts` | The instrument's own automatic measurements |
+| `src/ui/help.ts` | The "Need help connecting?" dialog |
+| `src/ui/format.ts` | Engineering-notation formatting for the UI. Pure |
+| `src/ui/log.ts` | The on-screen, capped log of everything exchanged with the instrument |
 | `src/ui/screenshot.ts` | Instrument screen capture, with format sniffing |
 | `src/export/csv.ts` | Capture → CSV. Pure string building |
+| `src/export/download.ts` | Hands a file to the browser; the only `src/export` module that touches the DOM |
 | `tools/probe.py` | Raw USBTMC prober, for verifying the protocol against hardware |
 
 The layering rule is the important part: `scpi.ts`, `waveform.ts` and `limits.ts` never
