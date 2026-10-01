@@ -188,15 +188,22 @@ function showStats(): void {
 /* -------------------------------------------------------- measurements --- */
 
 let measurementTimer: ReturnType<typeof setInterval> | null = null;
+let measurementInFlight = false;
 
 async function pollMeasurements(): Promise<void> {
-  const state = store.get();
-  const values = new Map<MeasurementTypeCode, number>();
-  for (const type of state.measurements) {
-    await sendSequence(measurementSetup(state.activeChannel, type));
-    values.set(type, parseNumber(await transport.query(MEASUREMENT_VALUE_QUERY)));
+  if (measurementInFlight) return;
+  measurementInFlight = true;
+  try {
+    const state = store.get();
+    const values = new Map<MeasurementTypeCode, number>();
+    for (const type of state.measurements) {
+      await sendSequence(measurementSetup(state.activeChannel, type));
+      values.set(type, parseNumber(await transport.query(MEASUREMENT_VALUE_QUERY)));
+    }
+    measurementPanel.setValues(values);
+  } finally {
+    measurementInFlight = false;
   }
-  measurementPanel.setValues(values);
 }
 
 function startMeasurementPolling(): void {

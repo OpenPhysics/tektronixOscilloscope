@@ -5,28 +5,30 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '30 2 * * 1'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Caller must grant the scopes the reusable workflows request (CodeQL needs
+# security-events: write, dependency-review needs pull-requests: write). The repo
+# default token is read-only, so without this block reusable calls fail at startup.
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+  pull-requests: write
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
+  ci:
+    uses: OpenPhysics/relay/.github/workflows/ci.yml@main
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: npm
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    uses: OpenPhysics/relay/.github/workflows/shared-dependency-review.yml@main
 
-      - run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      # The USBTMC framing, the SCPI encoder and the waveform maths are all pure
-      # functions, so the whole instrument language is tested here with no
-      # oscilloscope attached.
-      - name: Test
-        run: npm test
-
-      - name: Build
-        run: npx vite build
+  codeql:
+    uses: OpenPhysics/relay/.github/workflows/shared-codeql.yml@main
