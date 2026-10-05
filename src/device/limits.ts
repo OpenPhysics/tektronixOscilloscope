@@ -11,6 +11,8 @@
  * chosen to stay inside the real limits rather than to sit exactly on them.
  */
 
+import { type TriggerSourceCode } from './types.ts';
+
 /** Screen geometry. Verified: 2500-point records over 10 horizontal divisions. */
 export const RECORD_LENGTH = 2500;
 export const HORIZONTAL_DIVISIONS = 10;
@@ -104,6 +106,52 @@ export function clampTriggerLevel(
   const halfScreen = (VERTICAL_DIVISIONS / 2) * sourceScaleVPerDiv;
   const centre = -sourcePositionDiv * sourceScaleVPerDiv;
   return Math.max(centre - halfScreen, Math.min(centre + halfScreen, value));
+}
+
+export interface TriggerLevelBounds {
+  min: number;
+  max: number;
+  step: number;
+}
+
+/**
+ * Slider window for a channel trigger source.
+ *
+ * EXT, EXT5 and LINE return null. docs/PROTOCOL.md does not state an external
+ * level range, and LINE has no level at all — using the channel window for
+ * those sources writes a clamped channel voltage to TRIGGER:MAIN:LEVEL.
+ */
+export function triggerLevelBounds(
+  source: TriggerSourceCode,
+  channel: { scaleVPerDiv: number; positionDiv: number },
+): TriggerLevelBounds | null {
+  if (source !== 'CH1' && source !== 'CH2') return null;
+  const half = (VERTICAL_DIVISIONS / 2) * channel.scaleVPerDiv;
+  const centre = -channel.positionDiv * channel.scaleVPerDiv;
+  return {
+    min: centre - half,
+    max: centre + half,
+    step: channel.scaleVPerDiv / 100,
+  };
+}
+
+/**
+ * Clamp a trigger level for the source that will actually use it.
+ *
+ * Only CH1 and CH2 are limited to that channel's screen. EXT and EXT5 are left
+ * as entered (no external range is documented). LINE is left as entered so a
+ * later switch back to a channel still has the user's number; the encoder
+ * does not send a level while LINE is selected.
+ */
+export function clampTriggerLevelForSource(
+  levelV: number,
+  source: TriggerSourceCode,
+  channel: { scaleVPerDiv: number; positionDiv: number },
+): number {
+  if (source !== 'CH1' && source !== 'CH2') {
+    return Number.isFinite(levelV) ? levelV : 0;
+  }
+  return clampTriggerLevel(levelV, channel.scaleVPerDiv, channel.positionDiv);
 }
 
 /**

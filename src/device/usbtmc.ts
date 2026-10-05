@@ -78,6 +78,13 @@ interface QueueEntry {
   command: string;
 }
 
+/** Endpoint access held for the duration of `exclusive`. */
+export interface TransportIo {
+  write(command: string): Promise<void>;
+  query(command: string): Promise<string>;
+  queryBinary(command: string, timeoutMs?: number): Promise<Uint8Array>;
+}
+
 export function isWebUsbSupported(): boolean {
   return typeof navigator !== 'undefined' && 'usb' in navigator;
 }
@@ -103,6 +110,8 @@ export class UsbTmcTransport {
   private draining = false;
   /** Promise chain used as a mutex; see `serialise`. */
   private busy: Promise<unknown> = Promise.resolve();
+  /** One open at a time, shared by connect() and tryReconnect(). */
+  private connectInFlight: Promise<boolean> | null = null;
 
   constructor(private handlers: TransportHandlers = {}) {
     if (isWebUsbSupported()) {
@@ -123,21 +132,45 @@ export class UsbTmcTransport {
    * the browser no longer considers the call user-initiated, so never put an
    * `await` between the click and this call.
    */
+  /**
+   * Run `body` as the only device-open in flight. The lock is taken before
+   * `body` starts, so connect() and tryReconnect() cannot both claim the device.
+   */
+  private startConnect(body: () => Promise<boolean>): Promise<boolean> {
+    if (this.connectInFlight) return this.connectInFlight;
+    let begin!: () => void;
+    const gate = new Promise<boolean>((resolve, reject) => {
+      begin = () => {
+        body().then(resolve, reject);
+      };
+    });
+    const tracked = gate.finally(() => {
+      if (this.connectInFlight === tracked) this.connectInFlight = null;
+    });
+    this.connectInFlight = tracked;
+    begin();
+    return tracked;
+  }
+
   async connect(): Promise<void> {
     if (!isWebUsbSupported()) {
       this.setStatus('unsupported');
       throw new Error('This browser has no WebUSB API. Use Chrome or Edge on desktop.');
     }
-    this.setStatus('connecting');
-    try {
-      const device = await navigator.usb.requestDevice({
-        filters: [{ vendorId: USB_VENDOR_ID, productId: USB_PRODUCT_ID }],
-      });
-      await this.openDevice(device);
-    } catch (error) {
-      this.setStatus('disconnected');
-      throw asError(error);
-    }
+    if (this.connectInFlight || this.status === 'connecting') return;
+    await this.startConnect(async () => {
+      this.setStatus('connecting');
+      try {
+        const device = await navigator.usb.requestDevice({
+          filters: [{ vendorId: USB_VENDOR_ID, productId: USB_PRODUCT_ID }],
+        });
+        await this.openDevice(device);
+        return true;
+      } catch (error) {
+        this.setStatus('disconnected');
+        throw asError(error);
+      }
+    });
   }
 
   /**
@@ -148,42 +181,60 @@ export class UsbTmcTransport {
    */
   async tryReconnect(): Promise<boolean> {
     if (!isWebUsbSupported()) return false;
-    try {
-      const devices = await navigator.usb.getDevices();
-      const match = devices.find(
-        (device) =>
-          device.vendorId === USB_VENDOR_ID && device.productId === USB_PRODUCT_ID,
-      );
-      if (!match) return false;
-      await this.openDevice(match);
-      return true;
-    } catch {
-      // A device that is remembered but no longer plugged in lands here. That is
-      // the ordinary case on a fresh page load, not an error worth reporting.
-      return false;
-    }
+    if (this.connectInFlight || this.status === 'connecting') return false;
+    if (this.isConnected) return true;
+    return this.startConnect(async () => {
+      try {
+        const devices = await navigator.usb.getDevices();
+        const match = devices.find(
+          (device) =>
+            device.vendorId === USB_VENDOR_ID && device.productId === USB_PRODUCT_ID,
+        );
+        if (!match) return false;
+        await this.openDevice(match);
+        return true;
+      } catch {
+        // A device that is remembered but no longer plugged in lands here. That is
+        // the ordinary case on a fresh page load, not an error worth reporting.
+        return false;
+      }
+    });
   }
 
   private async openDevice(device: USBDevice): Promise<void> {
-    await device.open();
-    if (device.configuration === null) {
-      await device.selectConfiguration(1);
+    let opened = false;
+    try {
+      await device.open();
+      opened = true;
+      if (device.configuration === null) {
+        await device.selectConfiguration(1);
+      }
+
+      const target = this.findUsbTmcInterface(device);
+      await device.claimInterface(target.interfaceNumber);
+
+      this.device = device;
+      this.interfaceNumber = target.interfaceNumber;
+      this.endpointIn = target.endpointIn;
+      this.endpointOut = target.endpointOut;
+      this.packetSizeIn = target.packetSizeIn;
+      this.bTag = 0;
+
+      // Whatever the last session left in the endpoint buffers is not ours.
+      await this.clear().catch(() => undefined);
+
+      this.setStatus('connected');
+    } finally {
+      // claim() can throw before this.device is assigned. Close the handle we
+      // opened so it is not left claimed with nobody to release it.
+      if (opened && this.device !== device) {
+        try {
+          await device.close();
+        } catch {
+          // Already gone, or close raced an unplug.
+        }
+      }
     }
-
-    const target = this.findUsbTmcInterface(device);
-    await device.claimInterface(target.interfaceNumber);
-
-    this.device = device;
-    this.interfaceNumber = target.interfaceNumber;
-    this.endpointIn = target.endpointIn;
-    this.endpointOut = target.endpointOut;
-    this.packetSizeIn = target.packetSizeIn;
-    this.bTag = 0;
-
-    // Whatever the last session left in the endpoint buffers is not ours.
-    await this.clear().catch(() => undefined);
-
-    this.setStatus('connected');
   }
 
   /**
@@ -237,12 +288,30 @@ export class UsbTmcTransport {
 
   /** Send one command and do not wait for anything. */
   async write(command: string): Promise<void> {
-    return this.serialise(() => this.writeRaw(command));
+    return this.serialise(() => this.writePaced(command));
+  }
+
+  /**
+   * The inter-command gap lives here, not in the queue drain.
+   *
+   * sendSequence (session setup, encode-all, single-shot, waveform setup) calls
+   * write() in a tight loop and never went through drain(), so it used to hit
+   * the instrument with no gap. Putting the delay in both places would turn
+   * every queued command into a 40 ms gap.
+   */
+  private async writePaced(command: string): Promise<void> {
+    await this.writeRaw(command);
+    await delay(COMMAND_INTERVAL_MS);
   }
 
   /** Send a query and return its reply as text. */
   async query(command: string): Promise<string> {
-    const bytes = await this.queryBinary(command, COMMAND_TIMEOUT_MS);
+    return this.serialise(() => this.queryText(command));
+  }
+
+  private async queryText(command: string): Promise<string> {
+    await this.writeRaw(command);
+    const bytes = await this.readReply(COMMAND_TIMEOUT_MS);
     const text = new TextDecoder().decode(bytes).trim();
     this.handlers.onReceived?.(text);
     return text;
@@ -256,11 +325,29 @@ export class UsbTmcTransport {
    * characters.
    */
   async queryBinary(command: string, timeoutMs = IMAGE_TIMEOUT_MS): Promise<Uint8Array> {
-    return this.serialise(async () => {
-      await this.writeRaw(command);
-      const bytes = await this.readReply(timeoutMs);
-      return bytes;
-    });
+    return this.serialise(() => this.queryBinaryRaw(command, timeoutMs));
+  }
+
+  private async queryBinaryRaw(command: string, timeoutMs: number): Promise<Uint8Array> {
+    await this.writeRaw(command);
+    return this.readReply(timeoutMs);
+  }
+
+  /**
+   * Hold the endpoint mutex for a whole capture.
+   *
+   * write(), query() and the settings drain each take the mutex for one
+   * command and then release it, so a knob change queued mid-preamble would
+   * land before CURVE?. Callers that must keep preamble and curve (and both
+   * channels) from one acquisition run inside this instead.
+   */
+  exclusive<T>(fn: (io: TransportIo) => Promise<T>): Promise<T> {
+    return this.serialise(() => fn({
+      write: (command) => this.writePaced(command),
+      query: (command) => this.queryText(command),
+      queryBinary: (command, timeoutMs = IMAGE_TIMEOUT_MS) =>
+        this.queryBinaryRaw(command, timeoutMs),
+    }));
   }
 
   private async writeRaw(command: string): Promise<void> {
@@ -323,7 +410,15 @@ export class UsbTmcTransport {
         result.data.byteOffset,
         result.data.byteLength,
       );
-      const header = parseBulkInHeader(bytes);
+      let header: ReturnType<typeof parseBulkInHeader>;
+      try {
+        header = parseBulkInHeader(bytes);
+      } catch (error) {
+        // A header we cannot parse means the bulk-in stream is no longer
+        // aligned. Clear before the throw, or the next query reads this tail.
+        await this.clear().catch(() => undefined);
+        throw asError(error);
+      }
       const payload = bulkInPayload(bytes, header);
       chunks.push(payload.slice());
       total += payload.length;
@@ -340,6 +435,7 @@ export class UsbTmcTransport {
     // resynchronise. Returning the truncated bytes silently is how a capped
     // buffer turns into a corrupt image and then an unexplained timeout.
     if (!complete) {
+      await this.clear().catch(() => undefined);
       throw new Error(
         `reply exceeded ${MAX_REPLY_BYTES} bytes without completing; endpoint reset`,
       );
@@ -361,6 +457,33 @@ export class UsbTmcTransport {
    * next read would return the tail of the abandoned one. The USBTMC clear is
    * what resynchronises them.
    */
+  /**
+   * Bound a transfer that must not itself call `clear`.
+   *
+   * `withTimeout` recovers by calling `clear`. Using it inside `clear` would
+   * recurse, and an untimed control transfer there hangs the page forever.
+   */
+  private async withDeadline<T>(
+    operation: Promise<T>,
+    timeoutMs: number,
+    what: string,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`${what}: no response after ${timeoutMs} ms`)),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async withTimeout<T>(
     operation: Promise<T>,
     timeoutMs: number,
@@ -414,9 +537,12 @@ export class UsbTmcTransport {
         try {
           await this.write(entry.command);
         } catch (error) {
+          // One failure is enough. The next command would otherwise sit in its
+          // own 5 s timeout, and the one after that, until the queue is empty.
           this.handlers.onError?.(asError(error).message);
+          this.queue = [];
+          break;
         }
-        await delay(COMMAND_INTERVAL_MS);
       }
     } finally {
       this.draining = false;
@@ -462,33 +588,45 @@ export class UsbTmcTransport {
     const device = this.device;
     if (!device) return;
 
-    await device.controlTransferIn(
-      {
-        requestType: 'class',
-        recipient: 'interface',
-        request: INITIATE_CLEAR,
-        value: 0,
-        index: this.interfaceNumber,
-      },
-      1,
-    );
-
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const status = await device.controlTransferIn(
+    await this.withDeadline(
+      device.controlTransferIn(
         {
           requestType: 'class',
           recipient: 'interface',
-          request: CHECK_CLEAR_STATUS,
+          request: INITIATE_CLEAR,
           value: 0,
           index: this.interfaceNumber,
         },
-        2,
+        1,
+      ),
+      COMMAND_TIMEOUT_MS,
+      'USBTMC clear',
+    );
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const status = await this.withDeadline(
+        device.controlTransferIn(
+          {
+            requestType: 'class',
+            recipient: 'interface',
+            request: CHECK_CLEAR_STATUS,
+            value: 0,
+            index: this.interfaceNumber,
+          },
+          2,
+        ),
+        COMMAND_TIMEOUT_MS,
+        'USBTMC clear status',
       );
       if (status.data?.getUint8(0) !== CLEAR_STATUS_PENDING) break;
       await delay(50);
     }
 
-    await device.clearHalt('out', this.endpointOut);
+    await this.withDeadline(
+      device.clearHalt('out', this.endpointOut),
+      COMMAND_TIMEOUT_MS,
+      'USBTMC clear halt',
+    );
   }
 
   /* -------------------------------------------------------- disconnect --- */

@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   HORIZONTAL_SCALES_S, VERTICAL_SCALES_V, clampAverages, clampHorizontalScale,
-  clampPositionDiv, clampProbeAttenuation, clampTriggerLevel, clampVerticalScale,
+  clampPositionDiv, clampProbeAttenuation, clampTriggerLevel, clampTriggerLevelForSource,
+  clampVerticalScale, triggerLevelBounds,
   snapToLadder,
 } from '../src/device/limits.ts';
 
@@ -101,6 +102,21 @@ describe('positions and levels', () => {
   it('follows the window when the volts per division change', () => {
     expect(clampTriggerLevel(10, 5, 0)).toBe(10);
     expect(clampTriggerLevel(10, 0.1, 0)).toBeCloseTo(0.4, 12);
+  });
+
+  it('clamps only channel sources to the channel window', () => {
+    const channel = { scaleVPerDiv: 1, positionDiv: 0 };
+    expect(clampTriggerLevelForSource(10, 'CH1', channel)).toBe(4);
+    expect(clampTriggerLevelForSource(10, 'CH2', channel)).toBe(4);
+    // No external range is documented, and LINE has no level. Neither is
+    // pulled into CH1's ±4 V window.
+    expect(clampTriggerLevelForSource(10, 'EXT', channel)).toBe(10);
+    expect(clampTriggerLevelForSource(10, 'EXT5', channel)).toBe(10);
+    expect(clampTriggerLevelForSource(10, 'LINE', channel)).toBe(10);
+    expect(triggerLevelBounds('CH1', channel)).toEqual({ min: -4, max: 4, step: 0.01 });
+    expect(triggerLevelBounds('EXT', channel)).toBeNull();
+    expect(triggerLevelBounds('EXT5', channel)).toBeNull();
+    expect(triggerLevelBounds('LINE', channel)).toBeNull();
   });
 });
 

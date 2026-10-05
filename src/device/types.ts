@@ -92,10 +92,18 @@ export interface TriggerState {
   mode: TriggerModeCode;
 }
 
+/** ACQuire:STOPAfter. RUNSTOP free-runs; SEQUENCE is one acquisition. */
+export type StopAfter = 'RUNSTOP' | 'SEQUENCE';
+
 export interface AcquisitionState {
   mode: AcquireModeCode;
   /** Only meaningful when mode is AVERAGE. The instrument accepts 4, 16, 64 or 128. */
   averages: number;
+  /**
+   * Free-run versus single-shot. Kept beside `running` because sending STATE
+   * alone leaves the previous stop-after mode in force.
+   */
+  stopAfter: StopAfter;
   running: boolean;
 }
 
@@ -139,6 +147,7 @@ export function defaultInstrumentState(): InstrumentState {
     acquisition: {
       mode: AcquireMode.sample,
       averages: 16,
+      stopAfter: 'RUNSTOP',
       running: true,
     },
   };

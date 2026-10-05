@@ -62,10 +62,12 @@ export function emptyPreamble(): Preamble {
 /**
  * Unwrap an IEEE 488.2 definite-length block: `#<n><length, n digits><payload>`.
  *
- * `#42500` means "four digits of length follow, and they say 2500". Both
- * CURVe? and HARDCopy answer in this form. Indefinite-length blocks (`#0`,
- * terminated by EOI) are rejected rather than guessed at - this instrument does
- * not send them, and accepting one would mean trusting the transfer length
+ * `#42500` means "four digits of length follow, and they say 2500". CURVe?
+ * answers in this form. HARDCOPY START does not: it returns raw image bytes
+ * beginning `BM` or `FF D8`, with no `#<n><length>` prefix, and must not be
+ * passed through this function. Indefinite-length blocks (`#0`, terminated by
+ * EOI) are rejected rather than guessed at - this instrument does not send
+ * them for CURVe?, and accepting one would mean trusting the transfer length
  * instead of the declared length.
  */
 export function parseDefiniteLengthBlock(data: Uint8Array): Uint8Array {

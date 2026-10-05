@@ -14,7 +14,7 @@ import {
   preambleQuery, readbackPlan, screenshotSetup, waveformSetup,
 } from './device/scpi.ts';
 import { CHANNELS, type ChannelId, type MeasurementTypeCode } from './device/types.ts';
-import { UsbTmcTransport, isWebUsbSupported } from './device/usbtmc.ts';
+import { UsbTmcTransport, isWebUsbSupported, type TransportIo } from './device/usbtmc.ts';
 import {
   buildCapture, emptyPreamble, summarise, type Capture, type Preamble,
 } from './device/waveform.ts';
@@ -115,10 +115,10 @@ function run(action: () => Promise<void>): void {
  * between, and a stale preamble produces a plot that is wrong by a constant
  * factor with nothing in the data to reveal it.
  */
-async function readPreamble(): Promise<Preamble> {
+async function readPreamble(io: TransportIo): Promise<Preamble> {
   const replies = new Map<string, string>();
   for (const field of PREAMBLE_FIELDS) {
-    replies.set(field, await transport.query(preambleQuery(field)));
+    replies.set(field, await io.query(preambleQuery(field)));
   }
   const number = (field: string): number => parseNumber(replies.get(field) ?? '');
   const text = (field: string): string => (replies.get(field) ?? '').replace(/"/g, '').trim();
@@ -136,10 +136,10 @@ async function readPreamble(): Promise<Preamble> {
   return preamble;
 }
 
-async function captureChannel(channel: ChannelId): Promise<Capture> {
-  await sendSequence(waveformSetup(channel));
-  const preamble = await readPreamble();
-  const reply = await transport.queryBinary(CURVE_QUERY);
+async function captureChannel(io: TransportIo, channel: ChannelId): Promise<Capture> {
+  for (const command of waveformSetup(channel)) await io.write(command);
+  const preamble = await readPreamble(io);
+  const reply = await io.queryBinary(CURVE_QUERY);
   log.add('rx', `CURVE? -> ${reply.length} bytes`);
   return buildCapture(channel, reply, preamble, Date.now());
 }
@@ -163,11 +163,27 @@ async function capture(): Promise<void> {
     return;
   }
 
-  const results: Capture[] = [];
-  for (const id of wanted) results.push(await captureChannel(id));
+  const wasRunning = state.instrument.acquisition.running;
+  const results = await transport.exclusive(async (io) => {
+    // Two CURVE? reads from a free-running scope can come from different
+    // sweeps. Stop first so both channels are the same frozen acquisition,
+    // which is what the CSV header claims. The settings queue stays blocked
+    // until this callback returns: exclusive holds the endpoint mutex the
+    // drain also needs.
+    if (wanted.length > 1) await io.write('ACQUIRE:STATE STOP');
+    const taken: Capture[] = [];
+    for (const id of wanted) taken.push(await captureChannel(io, id));
+    return taken;
+  });
 
   captures = results;
-  plot.show(captures, state.instrument);
+  if (wanted.length > 1 && wasRunning) {
+    store.update((draft) => {
+      draft.instrument.acquisition.running = false;
+    });
+  }
+
+  plot.show(captures, store.get().instrument);
   showStats();
 }
 
@@ -292,7 +308,11 @@ connectButton.addEventListener('click', () => {
   // No await before requestDevice: the browser only allows it inside the gesture.
   transport
     .connect()
-    .then(onConnected)
+    .then(() => {
+      // Ignored when a reconnect is already opening the device. Only a call
+      // that left us connected should run session setup.
+      if (transport.isConnected) return onConnected();
+    })
     .catch((error: unknown) => {
       // NotFoundError covers both "the user closed the chooser" and "the chooser
       // had nothing in it to choose", which WebUSB gives no way to tell apart.
@@ -318,16 +338,27 @@ async function onConnected(): Promise<void> {
 
 need('capture-button').addEventListener('click', () => run(capture));
 
-need('single-button').addEventListener('click', () =>
-  run(async () => {
-    await sendSequence(SINGLE_SHOT);
-    log.add('info', 'armed for a single acquisition');
-  }),
-);
+need('single-button').addEventListener('click', () => {
+  const acquisition = store.get().instrument.acquisition;
+  const alreadyArmed = acquisition.stopAfter === 'SEQUENCE' && acquisition.running;
+  store.update((draft) => {
+    draft.instrument.acquisition.stopAfter = 'SEQUENCE';
+    draft.instrument.acquisition.running = true;
+  });
+  // Already in that state: the diff is empty, but the button should re-arm.
+  if (!transport.isConnected) return;
+  // Already SEQUENCE and running: the diff was empty, so re-send the pair.
+  if (alreadyArmed) transport.enqueueAll(SINGLE_SHOT);
+  log.add('info', 'armed for a single acquisition');
+});
 
 need('run-stop-button').addEventListener('click', () => {
   store.update((draft) => {
-    draft.instrument.acquisition.running = !draft.instrument.acquisition.running;
+    const nextRunning = !draft.instrument.acquisition.running;
+    draft.instrument.acquisition.running = nextRunning;
+    // Starting a run is free-running. Leaving STOPAFTER at SEQUENCE would arm
+    // another single shot the next time STATE goes to RUN.
+    if (nextRunning) draft.instrument.acquisition.stopAfter = 'RUNSTOP';
   });
 });
 

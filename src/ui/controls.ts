@@ -14,7 +14,7 @@
 
 import {
   AVERAGE_COUNTS, HORIZONTAL_SCALES_S, PROBE_ATTENUATIONS, VERTICAL_DIVISIONS,
-  VERTICAL_SCALES_V,
+  VERTICAL_SCALES_V, triggerLevelBounds,
 } from '../device/limits.ts';
 import {
   AcquireMode, CHANNELS, Coupling, TriggerMode, TriggerSlope, TriggerSource,
@@ -419,16 +419,26 @@ export class TriggerPanel {
     this.slope.value = trigger.slope;
     this.mode.value = trigger.mode;
 
-    // Bound the level by the source channel's visible window; a level off screen
-    // can never be crossed, so the scope would sit untriggered forever.
+    if (trigger.source === 'LINE') {
+      // Mains line has no level. Leave the stored number alone.
+      this.level.disabled = true;
+      this.levelValue.textContent = 'n/a';
+      return;
+    }
+
     const channel = trigger.source === 'CH2' ? instrument.ch2 : instrument.ch1;
-    const half = (VERTICAL_DIVISIONS / 2) * channel.scaleVPerDiv;
-    const centre = -channel.positionDiv * channel.scaleVPerDiv;
-    this.refreshBounds({
-      min: centre - half,
-      max: centre + half,
-      step: channel.scaleVPerDiv / 100,
-    });
+    const bounds = triggerLevelBounds(trigger.source, channel);
+    this.level.disabled = false;
+    if (bounds) {
+      // A level off the source channel's screen can never be crossed.
+      this.refreshBounds(bounds);
+    } else {
+      // EXT / EXT5. No external range is documented, so do not reuse the
+      // channel window. The span grows with the value so the slider can show
+      // it without forcing it into CH1's limits.
+      const span = Math.max(1, Math.abs(trigger.levelV));
+      this.refreshBounds({ min: -span * 2, max: span * 2, step: 0.01 });
+    }
     this.level.value = String(trigger.levelV);
     this.levelValue.textContent = formatEngineering(trigger.levelV, 'V');
   }

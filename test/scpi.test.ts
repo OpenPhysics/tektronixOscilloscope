@@ -102,6 +102,11 @@ describe('horizontal and trigger encoding', () => {
     expect(commands.findIndex((c) => c.includes('EDGE:SOURCE')))
       .toBeLessThan(commands.findIndex((c) => c.includes(':LEVEL')));
   });
+
+  it('does not send a level for mains-line trigger', () => {
+    const trigger = { ...state.trigger, source: 'LINE' as const, levelV: 4 };
+    expect(encodeTrigger(trigger).some((command) => command.includes('LEVEL'))).toBe(false);
+  });
 });
 
 describe('acquisition encoding', () => {
@@ -114,6 +119,21 @@ describe('acquisition encoding', () => {
   it('stops when asked to', () => {
     const stopped = { ...defaultInstrumentState().acquisition, running: false };
     expect(encodeAcquisition(stopped)).toContain('ACQUIRE:STATE STOP');
+  });
+
+  it('encodes single-shot from the stored stop-after mode', () => {
+    const single = {
+      ...defaultInstrumentState().acquisition,
+      stopAfter: 'SEQUENCE' as const,
+      running: true,
+    };
+    const commands = encodeAcquisition(single);
+    expect(commands).toContain('ACQUIRE:STOPAFTER SEQUENCE');
+    expect(commands).toContain('ACQUIRE:STATE RUN');
+    const stopAt = commands.findIndex((command) => command.startsWith('ACQUIRE:STOPAFTER'));
+    const stateAt = commands.findIndex((command) => command.startsWith('ACQUIRE:STATE'));
+    expect(stopAt).toBeGreaterThanOrEqual(0);
+    expect(stopAt).toBeLessThan(stateAt);
   });
 
   it('rounds the averaging count, which must be an integer', () => {
@@ -133,6 +153,27 @@ describe('diffing', () => {
     const after = structuredClone(before);
     after.ch1.scaleVPerDiv = 0.5;
     expect(diffAll(before, after)).toEqual(['CH1:SCALE 5.000000E-1']);
+  });
+
+  it('sends STOPAFTER together with STATE', () => {
+    const before = defaultInstrumentState();
+    const after = structuredClone(before);
+    after.acquisition.running = false;
+    expect(diffAll(before, after)).toEqual([
+      'ACQUIRE:STOPAFTER RUNSTOP',
+      'ACQUIRE:STATE STOP',
+    ]);
+  });
+
+  it('diffs a single-shot arm as STOPAFTER SEQUENCE plus STATE RUN', () => {
+    const before = defaultInstrumentState();
+    const after = structuredClone(before);
+    after.acquisition.stopAfter = 'SEQUENCE';
+    after.acquisition.running = true;
+    expect(diffAll(before, after)).toEqual([
+      'ACQUIRE:STOPAFTER SEQUENCE',
+      'ACQUIRE:STATE RUN',
+    ]);
   });
 
   it('does not leak a change on one channel into the other', () => {

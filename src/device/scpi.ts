@@ -95,12 +95,17 @@ export function encodeHorizontal(horizontal: HorizontalState): string[] {
 }
 
 export function encodeTrigger(trigger: TriggerState): string[] {
-  return [
+  const commands = [
     `TRIGGER:MAIN:EDGE:SOURCE ${trigger.source}`,
     `TRIGGER:MAIN:EDGE:SLOPE ${trigger.slope}`,
     `TRIGGER:MAIN:MODE ${trigger.mode}`,
-    `TRIGGER:MAIN:LEVEL ${formatNumber(trigger.levelV)}`,
   ];
+  // Mains-line trigger has no level. Sending one would be a channel-window
+  // voltage left over from the previous source.
+  if (trigger.source !== 'LINE') {
+    commands.push(`TRIGGER:MAIN:LEVEL ${formatNumber(trigger.levelV)}`);
+  }
+  return commands;
 }
 
 /**
@@ -111,15 +116,23 @@ export function encodeTrigger(trigger: TriggerState): string[] {
  * leaves the previous stop-after mode in force.
  */
 export function encodeAcquisition(acquisition: AcquisitionState): string[] {
+  const stopAfter = acquisition.stopAfter === 'SEQUENCE' ? 'SEQUENCE' : 'RUNSTOP';
   return [
     `ACQUIRE:MODE ${acquisition.mode}`,
     `ACQUIRE:NUMAVG ${Math.round(acquisition.averages)}`,
-    'ACQUIRE:STOPAFTER RUNSTOP',
+    `ACQUIRE:STOPAFTER ${stopAfter}`,
     `ACQUIRE:STATE ${acquisition.running ? 'RUN' : 'STOP'}`,
   ];
 }
 
-/** Arm a single acquisition and stop. */
+/**
+ * Arm a single acquisition and stop.
+ *
+ * The Single button normally reaches this pair by setting `stopAfter` to
+ * SEQUENCE and `running` to true, then diffing. This constant is the same pair,
+ * used only to re-arm when the store is already in that state and the diff
+ * would be empty.
+ */
 export const SINGLE_SHOT: readonly string[] = [
   'ACQUIRE:STOPAFTER SEQUENCE',
   'ACQUIRE:STATE RUN',
@@ -155,7 +168,35 @@ export function diffChannel(id: ChannelId, before: ChannelState, after: ChannelS
 }
 
 export function diffAll(before: InstrumentState, after: InstrumentState): string[] {
-  return diffCommands(encodeAll(before), encodeAll(after));
+  return withAcquisitionPair(diffCommands(encodeAll(before), encodeAll(after)), after);
+}
+
+/**
+ * STOPAFTER and STATE travel together.
+ *
+ * Sending STATE alone leaves the previous stop-after mode in force, so a Run
+ * after a single-shot would arm another single acquisition. If either command
+ * changed, send both, using the values now in the store.
+ */
+function withAcquisitionPair(commands: string[], after: InstrumentState): string[] {
+  const stopKey = 'ACQUIRE:STOPAFTER';
+  const stateKey = 'ACQUIRE:STATE';
+  const hasStop = commands.some((command) => commandKey(command) === stopKey);
+  const hasState = commands.some((command) => commandKey(command) === stateKey);
+  if (hasStop === hasState) return commands;
+
+  const encoded = encodeAcquisition(after.acquisition);
+  const stopCommand = encoded.find((command) => commandKey(command) === stopKey);
+  const stateCommand = encoded.find((command) => commandKey(command) === stateKey);
+  if (!stopCommand || !stateCommand) return commands;
+
+  const next = [...commands];
+  if (!hasStop) {
+    const index = next.findIndex((command) => commandKey(command) === stateKey);
+    next.splice(index, 0, stopCommand);
+  }
+  if (!hasState) next.push(stateCommand);
+  return next;
 }
 
 /* -------------------------------------------------------------- queries --- */
@@ -366,6 +407,9 @@ export function readbackPlan(): Readback[] {
         state.acquisition.running = parseBoolean(reply);
       },
     },
+    // ACQUIRE:STOPAFTER? is not a verified query in docs/PROTOCOL.md. An
+    // unrecognised query times out and leaves the endpoint mid-transaction, so
+    // stop-after is tracked locally and diffed with STATE instead of read back.
   );
 
   return plan;

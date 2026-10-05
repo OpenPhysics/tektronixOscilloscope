@@ -13,7 +13,7 @@
 
 import {
   clampAverages, clampHorizontalPosition, clampHorizontalScale, clampPositionDiv,
-  clampProbeAttenuation, clampTriggerLevel, clampVerticalScale,
+  clampProbeAttenuation, clampTriggerLevelForSource, clampVerticalScale,
 } from './device/limits.ts';
 import {
   channelKey, defaultInstrumentState,
@@ -118,16 +118,21 @@ export class Store {
       instrument.horizontal.scaleSPerDiv,
     );
 
-    // The trigger level is bounded by the window of whichever channel triggers,
-    // so it has to be clamped after the vertical settings have settled.
-    const source = instrument.trigger.source === 'CH2' ? instrument.ch2 : instrument.ch1;
-    instrument.trigger.levelV = clampTriggerLevel(
+    // Only a channel source is bounded by that channel's screen. EXT and EXT5
+    // have no documented external range, and LINE has no level — clamping
+    // those to CH1's window is what was being written to the instrument.
+    const source = instrument.trigger.source;
+    const channel = source === 'CH2' ? instrument.ch2 : instrument.ch1;
+    instrument.trigger.levelV = clampTriggerLevelForSource(
       instrument.trigger.levelV,
-      source.scaleVPerDiv,
-      source.positionDiv,
+      source,
+      channel,
     );
 
     instrument.acquisition.averages = clampAverages(instrument.acquisition.averages);
+    if (instrument.acquisition.stopAfter !== 'SEQUENCE') {
+      instrument.acquisition.stopAfter = 'RUNSTOP';
+    }
   }
 
   private persist(): void {
