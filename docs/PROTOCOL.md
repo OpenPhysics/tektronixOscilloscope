@@ -248,6 +248,18 @@ MEASUREMENT:IMMED:VALUE?
 **[M]** `IMMED` is used rather than the five numbered `MEAS<x>` slots because it can
 be repointed freely without disturbing what the user has set up on the front panel.
 
+**[M]** Read `TYPE?` back before trusting `VALUE?`. A rejected type keyword is
+silent: the previous type stays selected and `VALUE?` answers for that. Under
+`VERBOSE OFF` the reply is the short form (`PERIOD` comes back as `PERI`).
+
+**[M]** Take `VALUE?` twice after a type change and keep the second reply. Table
+3-3 of the programmer manual lists the operations that generate an OPC message,
+and changing `IMMED:TYPE` is not one of them, so `*OPC?` returns immediately and
+does not wait for the measurement to be recomputed. The first `VALUE?` still
+answers with the previous quantity. A pending single-sequence acquisition is the
+case `*OPC?` *would* wait for, and waiting on it from the measurement poll would
+block until the trigger arrived or the command timeout cleared the USB link.
+
 **[M]** A value of **9.9e37** means "cannot measure" — an unstable signal, or a
 frequency request on a flat line. It is not an error and not a real reading; the UI
 shows it as `unstable`.

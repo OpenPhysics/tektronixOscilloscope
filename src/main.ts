@@ -8,10 +8,11 @@
  */
 
 import {
-  CURVE_QUERY, ERROR_QUERY, IDENTITY_QUERY, MEASUREMENT_VALUE_QUERY, PREAMBLE_FIELDS,
-  SCREENSHOT_FORMATS, SCREENSHOT_QUERY, SESSION_SETUP, SINGLE_SHOT,
-  diffAll, encodeAll, isPlausibleCommand, measurementSetup, parseIdentity, parseNumber,
-  preambleQuery, readbackPlan, screenshotSetup, waveformSetup,
+  CURVE_QUERY, ERROR_QUERY, IDENTITY_QUERY, MEASUREMENT_TYPE_QUERY,
+  MEASUREMENT_VALUE_QUERY, PREAMBLE_FIELDS, SCREENSHOT_FORMATS, SCREENSHOT_QUERY,
+  SESSION_SETUP, SINGLE_SHOT, diffAll, encodeAll, isPlausibleCommand, measurementSetup,
+  measurementTypeMatches, parseIdentity, parseNumber, preambleQuery, readbackPlan,
+  screenshotSetup, waveformSetup,
 } from './device/scpi.ts';
 import { CHANNELS, type ChannelId, type MeasurementTypeCode } from './device/types.ts';
 import { UsbTmcTransport, isWebUsbSupported, type TransportIo } from './device/usbtmc.ts';
@@ -62,9 +63,11 @@ const transport = new UsbTmcTransport({
     statusText.textContent = labels[status];
     statusPill.dataset['status'] = status;
     connectButton.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
-    setControlsEnabled(status === 'connected');
     if (detail) log.add('info', detail);
     if (status !== 'connected') {
+      // Enabling waits until onConnected has adopted the front panel. Turning
+      // the controls on here would let "Push all" land before that read.
+      setControlsEnabled(false);
       identityText.textContent = '';
       stopMeasurementPolling();
     }
@@ -206,6 +209,44 @@ function showStats(): void {
 let measurementTimer: ReturnType<typeof setInterval> | null = null;
 let measurementInFlight = false;
 
+/** Types the instrument has already refused, so the log is not filled every second. */
+const rejectedMeasurementTypes = new Set<string>();
+
+/**
+ * One immediate measurement.
+ *
+ * Two things both put a neighbour's number in the slot, and both are checked:
+ *
+ * The type is read back before the value is trusted. A rejected keyword leaves
+ * the previous type in force and `VALUE?` answers for that, with no error.
+ *
+ * `VALUE?` is issued twice and the first reply is discarded. Changing the type
+ * does not generate an operation-complete message on this series, so there is
+ * nothing to wait on, and the first value after a type change is still the
+ * previous quantity. The second query is the one for the type just set.
+ */
+async function readMeasurement(
+  source: ChannelId,
+  type: MeasurementTypeCode,
+): Promise<number | null> {
+  await sendSequence(measurementSetup(source, type));
+  const reported = await transport.query(MEASUREMENT_TYPE_QUERY);
+  if (!measurementTypeMatches(reported, type)) {
+    const answer = reported.trim() || 'nothing';
+    const key = `${type}:${answer}`;
+    if (!rejectedMeasurementTypes.has(key)) {
+      rejectedMeasurementTypes.add(key);
+      log.add(
+        'error',
+        `the instrument kept ${answer} instead of measurement type ${type}`,
+      );
+    }
+    return null;
+  }
+  await transport.query(MEASUREMENT_VALUE_QUERY);
+  return parseNumber(await transport.query(MEASUREMENT_VALUE_QUERY));
+}
+
 async function pollMeasurements(): Promise<void> {
   if (measurementInFlight) return;
   measurementInFlight = true;
@@ -213,8 +254,9 @@ async function pollMeasurements(): Promise<void> {
     const state = store.get();
     const values = new Map<MeasurementTypeCode, number>();
     for (const type of state.measurements) {
-      await sendSequence(measurementSetup(state.activeChannel, type));
-      values.set(type, parseNumber(await transport.query(MEASUREMENT_VALUE_QUERY)));
+      const reading = await readMeasurement(state.activeChannel, type);
+      if (reading === null) continue;
+      values.set(type, reading);
     }
     measurementPanel.setValues(values);
   } finally {
@@ -285,13 +327,19 @@ async function transferScreen(): Promise<void> {
  *
  * The model change case does not arise here - unlike the sibling generator
  * project there is one model - so a full resend is only ever explicit.
+ *
+ * Adopting a readback is the exception: the store is catching up with the
+ * bench, and echoing that diff would write the instrument's own settings
+ * back onto it, including any value the clamps had adjusted.
  */
+let adoptingFromInstrument = false;
+
 function onStateChanged(next: AppState, prev: AppState): void {
   for (const panel of panels) panel.refresh();
   measurementPanel.refresh();
   if (captures.length > 0) plot.show(captures, next.instrument);
 
-  if (!transport.isConnected) return;
+  if (!transport.isConnected || adoptingFromInstrument) return;
   transport.enqueueAll(diffAll(prev.instrument, next.instrument));
 }
 store.subscribe(onStateChanged);
@@ -327,13 +375,32 @@ connectButton.addEventListener('click', () => {
 });
 
 async function onConnected(): Promise<void> {
+  setControlsEnabled(false);
   await sendSequence(SESSION_SETUP);
   const identity = parseIdentity(await transport.query(IDENTITY_QUERY));
   identityText.textContent = `${identity.model} - serial ${identity.serial}`;
   log.add('info', `connected to ${identity.model}, firmware ${identity.firmware}`);
-  // Push the remembered settings so the page and the instrument agree from the start.
-  await sendSequence(encodeAll(store.get().instrument));
+  // The bench is the source of truth. Pushing the remembered settings here
+  // would undo a setup made at the front panel, and the remembered probe is
+  // often 10X on a rig that is actually 1X.
+  await adoptFromInstrument();
+  log.add('info', 'adopted the front panel from the instrument');
   if (store.get().liveMeasurements) startMeasurementPolling();
+  if (transport.isConnected) setControlsEnabled(true);
+}
+
+/** Read the front panel and make the page match it, without writing back. */
+async function adoptFromInstrument(): Promise<void> {
+  const draft = structuredClone(store.get().instrument);
+  for (const item of readbackPlan()) {
+    item.apply(draft, await transport.query(item.command));
+  }
+  adoptingFromInstrument = true;
+  try {
+    store.replaceInstrument(draft);
+  } finally {
+    adoptingFromInstrument = false;
+  }
 }
 
 need('capture-button').addEventListener('click', () => run(capture));
@@ -384,11 +451,7 @@ need<HTMLSelectElement>('active-channel').addEventListener('change', (event) => 
 
 need('readback-button').addEventListener('click', () =>
   run(async () => {
-    const draft = structuredClone(store.get().instrument);
-    for (const item of readbackPlan()) {
-      item.apply(draft, await transport.query(item.command));
-    }
-    store.replaceInstrument(draft);
+    await adoptFromInstrument();
     log.add('info', 'read the front panel back from the instrument');
   }),
 );

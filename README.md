@@ -33,8 +33,9 @@ cost is the driver bind above; the benefit is that it works at all.
 
 ## Using it
 
-Connect, and the page pushes its remembered settings so that it and the instrument
-agree from the start. Then:
+Connect, and the page reads the front panel and adopts it. The bench stays as
+you left it. **Push all settings** is the explicit way to send the page's settings
+the other direction. Then:
 
 - **Capture** transfers 2500 points per displayed channel and plots them. The graticule
   matches the scope's own screen — ten divisions across, eight down — so the two can be
@@ -45,9 +46,9 @@ agree from the start. Then:
   instrument's own display instead, which is what a lab report usually wants.
 - The **control panels** drive the real front panel. Scales are dropdowns, not sliders,
   because the instrument only accepts ladder values and silently rounds anything else.
-- **Read from instrument** goes the other way, adopting whatever the knobs have been
-  set to. Use it after anyone has touched the bench, or the page will overwrite their
-  changes on its next update.
+- **Read from instrument** adopts the knobs again after anyone has touched the
+  bench, so the next change the page sends is diffed against what the scope is
+  actually doing.
 
 Some things worth being clear about:
 

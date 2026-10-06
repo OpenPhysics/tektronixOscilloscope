@@ -138,7 +138,7 @@ export const SINGLE_SHOT: readonly string[] = [
   'ACQUIRE:STATE RUN',
 ];
 
-/** Every setting, for the initial push and for "Push all settings". */
+/** Every setting. Sent only by the explicit "Push all settings" action. */
 export function encodeAll(state: InstrumentState): string[] {
   return [
     ...encodeChannel(1, state.ch1),
@@ -242,7 +242,20 @@ export function measurementSetup(source: ChannelId, type: MeasurementTypeCode): 
   return [`MEASUREMENT:IMMED:SOURCE CH${source}`, `MEASUREMENT:IMMED:TYPE ${type}`];
 }
 
+export const MEASUREMENT_TYPE_QUERY = 'MEASUREMENT:IMMED:TYPE?';
 export const MEASUREMENT_VALUE_QUERY = 'MEASUREMENT:IMMED:VALUE?';
+
+/**
+ * Whether a `TYPE?` reply is the type just requested.
+ *
+ * Under `VERBOSE OFF` the instrument answers with the shortest keyword, so
+ * `PERIOD` comes back as `PERI`. A reply that does not match means the setting
+ * was rejected and the previous type is still in force — `VALUE?` would then
+ * answer for the wrong quantity, with no error.
+ */
+export function measurementTypeMatches(reply: string, type: MeasurementTypeCode): boolean {
+  return matchEnum(reply, [type]) === type;
+}
 
 /**
  * Ask for the scope's own screen.
@@ -290,9 +303,9 @@ export interface Readback {
 /**
  * Read the whole front panel back.
  *
- * Used after someone has turned the physical knobs: the page's idea of the
- * instrument is otherwise write-only, and would quietly overwrite their changes
- * on the next update.
+ * Used on connect, and again after someone has turned the physical knobs.
+ * Adopting the reply updates the page only. It does not write those values
+ * back; "Push all settings" is the only time the whole front panel is sent.
  */
 export function readbackPlan(): Readback[] {
   const plan: Readback[] = [];

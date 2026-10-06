@@ -12,9 +12,10 @@ import { describe, expect, it } from 'vitest';
 import {
   SESSION_SETUP, commandKey, diffAll, encodeAcquisition, encodeAll, encodeChannel,
   encodeHorizontal, encodeTrigger, formatNumber, isPlausibleCommand, matchEnum,
-  parseBoolean, parseIdentity, parseNumber, readbackPlan, waveformSetup,
+  measurementTypeMatches, parseBoolean, parseIdentity, parseNumber, readbackPlan,
+  waveformSetup,
 } from '../src/device/scpi.ts';
-import { defaultInstrumentState } from '../src/device/types.ts';
+import { MEASUREMENT_TYPES, defaultInstrumentState } from '../src/device/types.ts';
 
 describe('session setup', () => {
   it('turns headers off, without which every query reply is unparseable', () => {
@@ -362,6 +363,26 @@ describe('matchEnum', () => {
   it('returns null for an empty or unknown reply', () => {
     expect(matchEnum('', ['SAMPLE'])).toBeNull();
     expect(matchEnum('XYZ', ['SAMPLE'])).toBeNull();
+  });
+});
+
+describe('measurement type readback', () => {
+  it('accepts the short form VERBOSE OFF answers with', () => {
+    expect(measurementTypeMatches('PERI', 'PERIOD')).toBe(true);
+    expect(measurementTypeMatches('FREQ', 'FREQUENCY')).toBe(true);
+    expect(measurementTypeMatches('  pk2pk \n', 'PK2PK')).toBe(true);
+  });
+
+  it('rejects a reply that is still the previous type', () => {
+    expect(measurementTypeMatches('MEAN', 'FREQUENCY')).toBe(false);
+    expect(measurementTypeMatches('', 'PK2PK')).toBe(false);
+  });
+
+  it('keeps the four-character forms unambiguous across the offered types', () => {
+    const codes = MEASUREMENT_TYPES.map((entry) => entry.code);
+    for (const code of codes) {
+      expect(matchEnum(code.slice(0, 4), codes)).toBe(code);
+    }
   });
 });
 

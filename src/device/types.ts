@@ -127,11 +127,11 @@ function defaultChannelState(): ChannelState {
 }
 
 /**
- * A safe starting point, not a read of the instrument.
+ * What the controls show before the instrument has been read.
  *
- * The page pushes these on connect so that what is on screen and what is in the
- * scope agree; "Read from instrument" goes the other way when you have been
- * using the front panel.
+ * These are not sent on connect. The bench keeps its own setup and the page
+ * adopts it. Sending this instead would put the default 10X probe onto a rig
+ * that is actually 1X, and every voltage would read ten times too high.
  */
 export function defaultInstrumentState(): InstrumentState {
   return {
