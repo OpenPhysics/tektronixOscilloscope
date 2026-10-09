@@ -58,8 +58,10 @@ Some things worth being clear about:
   difference is visible rather than hidden.
 - **A measurement of `unstable` is the instrument's answer, not a failure.** It returns
   9.9e37 when it cannot measure — asking for a frequency on a flat line, for instance.
-- **Settings are remembered in this browser only**, and captures live in memory until
-  you save them. Reloading loses them.
+- **The scope owns its settings.** Connecting reads the front panel and the page
+  follows. This browser remembers only page choices: which channel is active, which
+  measurements are shown, and whether they update live. Reloading loses captures;
+  save them first.
 
 ## Development
 

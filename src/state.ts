@@ -1,10 +1,17 @@
 /**
- * The single source of truth for what the instrument has been told.
+ * The single source of truth for the page.
  *
  * Every change flows through `update`, which hands subscribers both the old and
  * new state. That is what lets main.ts diff them and transmit only the commands
  * that actually changed, instead of resending the whole front panel on every
- * drag of a slider.
+ * control change.
+ *
+ * The instrument's own settings are not remembered. This is a measurement
+ * instrument: the bench is set up before the page opens, and connecting adopts
+ * that setup. Remembering the last session's probe or volts/div would show a
+ * scale the scope is not using, and "Push all settings" would write it back.
+ * A remembered 10X probe on a 1X rig makes every voltage ten times too large.
+ * localStorage keeps only choices that belong to the page.
  *
  * Captures deliberately do not live here. A single 2500-point record is 40 kB of
  * Float64Array, and localStorage would be full after a handful of them; main.ts
@@ -16,7 +23,7 @@ import {
   clampProbeAttenuation, clampTriggerLevelForSource, clampVerticalScale,
 } from './device/limits.ts';
 import {
-  channelKey, defaultInstrumentState,
+  MEASUREMENT_TYPES, channelKey, defaultInstrumentState,
   type ChannelId, type ChannelState, type InstrumentState, type MeasurementTypeCode,
 } from './device/types.ts';
 
@@ -32,7 +39,60 @@ export interface AppState {
 
 export type Listener = (next: AppState, prev: AppState) => void;
 
-const STORAGE_KEY = 'tbs1072b.settings.v1';
+/** Page choices only. Instrument settings are adopted from the scope on connect. */
+const STORAGE_KEY = 'tbs1072b.preferences.v2';
+/** Previous key stored the whole front panel. Read once for the page choices, then dropped. */
+const LEGACY_STORAGE_KEY = 'tbs1072b.settings.v1';
+
+const MEASUREMENT_CODES = new Set<string>(MEASUREMENT_TYPES.map((type) => type.code));
+
+interface PagePreferences {
+  activeChannel: ChannelId;
+  measurements: MeasurementTypeCode[];
+  liveMeasurements: boolean;
+}
+
+function pagePreferences(state: AppState): PagePreferences {
+  return {
+    activeChannel: state.activeChannel,
+    measurements: state.measurements,
+    liveMeasurements: state.liveMeasurements,
+  };
+}
+
+/**
+ * Pull the page choices out of a saved payload.
+ *
+ * Anything else in the payload, including an instrument block from the old
+ * key, is ignored. A probe or timebase saved here must not become the next
+ * session's starting point.
+ */
+function parsePreferences(raw: string): Partial<PagePreferences> | null {
+  const saved: unknown = JSON.parse(raw);
+  if (!saved || typeof saved !== 'object') return null;
+  const record = saved as Record<string, unknown>;
+  const prefs: Partial<PagePreferences> = {};
+
+  if (record['activeChannel'] === 1 || record['activeChannel'] === 2) {
+    prefs.activeChannel = record['activeChannel'];
+  }
+
+  if (Array.isArray(record['measurements'])) {
+    const measurements = record['measurements'].filter(
+      (code): code is MeasurementTypeCode =>
+        typeof code === 'string' && MEASUREMENT_CODES.has(code),
+    );
+    if (measurements.length === record['measurements'].length) {
+      prefs.measurements = measurements;
+    }
+  }
+
+  if (typeof record['liveMeasurements'] === 'boolean') {
+    prefs.liveMeasurements = record['liveMeasurements'];
+  }
+
+  return prefs;
+}
 
 function initialState(): AppState {
   return {
@@ -137,24 +197,32 @@ export class Store {
 
   private persist(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(pagePreferences(this.state)));
     } catch {
       // Private windows and blocked site data both throw here. Losing the
-      // remembered settings is not worth breaking the page over.
+      // remembered page choices is not worth breaking the page over.
     }
   }
 
   private restore(): void {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const current = localStorage.getItem(STORAGE_KEY);
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      const raw = current ?? legacy;
       if (!raw) return;
-      const saved = JSON.parse(raw) as Partial<AppState>;
-      const merged: AppState = { ...initialState(), ...saved };
-      // Guard against a stale or hand-edited payload.
-      if (!merged.instrument?.ch1 || !merged.instrument?.ch2) return;
-      if (!merged.instrument.horizontal || !merged.instrument.trigger) return;
+      const prefs = parsePreferences(raw);
+      if (!prefs) return;
+      const merged: AppState = {
+        ...initialState(),
+        ...prefs,
+        instrument: defaultInstrumentState(),
+      };
       this.normalise(merged);
       this.state = merged;
+      // The old key carried the front panel. Drop it so a later load cannot
+      // pick that probe and scale back up.
+      if (legacy !== null) localStorage.removeItem(LEGACY_STORAGE_KEY);
+      if (current === null) this.persist();
     } catch {
       // Corrupt payload: fall back to defaults rather than failing to start.
     }

@@ -330,16 +330,25 @@ async function transferScreen(): Promise<void> {
  *
  * Adopting a readback is the exception: the store is catching up with the
  * bench, and echoing that diff would write the instrument's own settings
- * back onto it, including any value the clamps had adjusted.
+ * back onto it, including any value the clamps had adjusted. The hold covers
+ * the whole read, not only the store write, so a control changed while the
+ * queries are in flight cannot push the page's settings onto the bench.
  */
-let adoptingFromInstrument = false;
+let instrumentWriteHold = 0;
+
+function holdInstrumentWrites(): () => void {
+  instrumentWriteHold += 1;
+  return () => {
+    instrumentWriteHold -= 1;
+  };
+}
 
 function onStateChanged(next: AppState, prev: AppState): void {
   for (const panel of panels) panel.refresh();
   measurementPanel.refresh();
   if (captures.length > 0) plot.show(captures, next.instrument);
 
-  if (!transport.isConnected || adoptingFromInstrument) return;
+  if (!transport.isConnected || instrumentWriteHold > 0) return;
   transport.enqueueAll(diffAll(prev.instrument, next.instrument));
 }
 store.subscribe(onStateChanged);
@@ -376,30 +385,42 @@ connectButton.addEventListener('click', () => {
 
 async function onConnected(): Promise<void> {
   setControlsEnabled(false);
-  await sendSequence(SESSION_SETUP);
-  const identity = parseIdentity(await transport.query(IDENTITY_QUERY));
-  identityText.textContent = `${identity.model} - serial ${identity.serial}`;
-  log.add('info', `connected to ${identity.model}, firmware ${identity.firmware}`);
-  // The bench is the source of truth. Pushing the remembered settings here
-  // would undo a setup made at the front panel, and the remembered probe is
-  // often 10X on a rig that is actually 1X.
-  await adoptFromInstrument();
-  log.add('info', 'adopted the front panel from the instrument');
+  // Held from the first command. Session setup does not change the front
+  // panel, but the panels are already live, and a click before the read
+  // finished would diff against the page and overwrite the bench.
+  const release = holdInstrumentWrites();
+  try {
+    await sendSequence(SESSION_SETUP);
+    const identity = parseIdentity(await transport.query(IDENTITY_QUERY));
+    identityText.textContent = `${identity.model} - serial ${identity.serial}`;
+    log.add('info', `connected to ${identity.model}, firmware ${identity.firmware}`);
+    // The bench is the source of truth. Pushing the page's settings here
+    // would undo a setup made at the front panel, and the default probe is
+    // 10X on a rig that is often actually 1X.
+    await adoptFromInstrument();
+    log.add('info', 'adopted the front panel from the instrument');
+  } finally {
+    release();
+  }
   if (store.get().liveMeasurements) startMeasurementPolling();
   if (transport.isConnected) setControlsEnabled(true);
 }
 
 /** Read the front panel and make the page match it, without writing back. */
 async function adoptFromInstrument(): Promise<void> {
-  const draft = structuredClone(store.get().instrument);
-  for (const item of readbackPlan()) {
-    item.apply(draft, await transport.query(item.command));
-  }
-  adoptingFromInstrument = true;
+  setControlsEnabled(false);
+  const release = holdInstrumentWrites();
   try {
+    const draft = structuredClone(store.get().instrument);
+    for (const item of readbackPlan()) {
+      item.apply(draft, await transport.query(item.command));
+    }
     store.replaceInstrument(draft);
   } finally {
-    adoptingFromInstrument = false;
+    release();
+    // Nested inside onConnected, which is still holding writes and will
+    // enable the controls itself once the link is fully up.
+    if (transport.isConnected && instrumentWriteHold === 0) setControlsEnabled(true);
   }
 }
 
